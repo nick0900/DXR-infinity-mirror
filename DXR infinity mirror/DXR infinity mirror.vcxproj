@@ -148,12 +148,13 @@
   <ItemGroup>
     <ClCompile Include="DX12Base.cpp" />
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="WindowsHelper.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="DX12Base.h" />
     <ClInclude Include="GenericIncludes.h" />
     <ClInclude Include="Settings.h" />
-    <ClInclude Include="WindowHelper.h" />
+    <ClInclude Include="WindowsHelper.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

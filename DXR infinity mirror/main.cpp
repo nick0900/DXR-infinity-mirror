@@ -2,7 +2,7 @@
 
 #include "GenericIncludes.h"
 #include "Settings.h"
-#include "WindowHelper.h"
+#include "WindowsHelper.h"
 #include "DX12Base.h"
 
 
@@ -65,26 +65,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 	//WaitForGpu();
 	//CloseHandle(gEventHandle);
 
-	//SafeRelease(&gCommandQueue);
-	//SafeRelease(&gCommandAllocator);
-	//SafeRelease(&gCommandList4);
-	//SafeRelease(&gSwapChain4);
-
-	//SafeRelease(&gFence);
-
-	//SafeRelease(&mpOutputResource);
-	//SafeRelease(&gRTDescriptorHeap);
-	//SafeRelease(&gRTPipelineState);
-	//SafeRelease(&gGlobalRootSig);
-
-
-	//SafeRelease(&gRenderTargetsHeap);
-	//for (int i = 0; i < NUM_SWAP_BUFFERS; i++)
-	//{
-	//	SafeRelease(&gRenderTargets[i]);
-	//}
-
-	//SafeRelease(&gDevice5);
+	DX12Free();
 
 #ifdef _DEBUG
 	system("pause");

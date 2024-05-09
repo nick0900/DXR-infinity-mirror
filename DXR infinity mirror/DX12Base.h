@@ -13,3 +13,5 @@ inline void SafeRelease(Interface** ppInterfaceToRelease)
 }
 
 int DX12Setup(HWND wndHandle);
+
+void DX12Free();

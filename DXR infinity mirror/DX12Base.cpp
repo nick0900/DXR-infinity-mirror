@@ -7,23 +7,62 @@
 
 #include "Settings.h"
 #include "GenericIncludes.h"
+#include "WindowsHelper.h"
 
 namespace Base
 {
 	ID3D12Device* Dx12Device;
+	
+	ID3D12CommandQueue* Dx12MainQueue;
+	ID3D12CommandQueue* Dx12CopyQueue;
+	ID3D12CommandAllocator* Dx12CommandAllocator;
+	ID3D12GraphicsCommandList4* Dx12CommandList4;
+
+	IDXGISwapChain4* DxgiSwapChain4;
+	
 }
 
-int CreateDirect3DDevice(HWND wndHandle);
+int CreateDirect3DDevice();
+int CreateCommandInterfaces();
+int CreateSwapChain(HWND wndHandle);
 
 int DX12Setup(HWND wndHandle)
 {
-	if (CreateDirect3DDevice(wndHandle) != 0) return 1;
+	if (CreateDirect3DDevice() != 0) return 1;
 
-	//		CreateCommandInterfacesAndSwapChain(wndHandle);	//3. Create CommandQueue and SwapChain
+	if (CreateCommandInterfaces() != 0) return 1;
 
-	//		CreateFenceAndEventHandle();						//4. Create Fence and Event handle
+	if (CreateSwapChain(wndHandle) != 0) return 1;
 
-	//		CreateRenderTargets();								//5. Create render targets for backbuffer
+	//CreateFenceAndEventHandle();						//4. Create Fence and Event handle
+
+	//CreateRenderTargets();								//5. Create render targets for backbuffer
+}
+
+void DX12Free()
+{
+	//SafeRelease(&gFence);
+
+	//SafeRelease(&mpOutputResource);
+	//SafeRelease(&gRTDescriptorHeap);
+	//SafeRelease(&gRTPipelineState);
+	//SafeRelease(&gGlobalRootSig);
+
+
+	//SafeRelease(&gRenderTargetsHeap);
+	//for (int i = 0; i < NUM_SWAP_BUFFERS; i++)
+	//{
+	//	SafeRelease(&gRenderTargets[i]);
+	//}
+
+	SafeRelease(&Base::DxgiSwapChain4);
+
+	SafeRelease(&Base::Dx12CommandList4);
+	SafeRelease(&Base::Dx12CommandAllocator);
+	SafeRelease(&Base::Dx12CopyQueue);
+	SafeRelease(&Base::Dx12MainQueue);
+
+	SafeRelease(&Base::Dx12Device);
 }
 
 IDXGIAdapter1* GetAdapterSupportingDXR()
@@ -63,7 +102,7 @@ IDXGIAdapter1* GetAdapterSupportingDXR()
 	return adapter;
 }
 
-int CreateDirect3DDevice(HWND wndHandle)
+int CreateDirect3DDevice()
 {
 #ifdef _DEBUG
 	//Enable the D3D12 debug layer.
@@ -102,4 +141,95 @@ int CreateDirect3DDevice(HWND wndHandle)
 	}
 	std::cerr << "Error: No DXR compatible device available\n";
 	return 1;
+}
+
+
+int CreateCommandInterfaces()
+{
+	do
+	{
+		//Describe and create the command queue.
+		D3D12_COMMAND_QUEUE_DESC cqd = {};
+		cqd.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+		if (FAILED(Base::Dx12Device->CreateCommandQueue(&cqd, IID_PPV_ARGS(&Base::Dx12MainQueue)))) break;
+
+		cqd.Type = D3D12_COMMAND_LIST_TYPE_COPY;
+		if (FAILED(Base::Dx12Device->CreateCommandQueue(&cqd, IID_PPV_ARGS(&Base::Dx12CopyQueue)))) break;
+
+		//Create command allocator. The command allocator object corresponds
+		//to the underlying allocations in which GPU commands are stored.
+		if (FAILED(Base::Dx12Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&Base::Dx12CommandAllocator)))) break;
+
+		//Create command list.
+		if (FAILED(Base::Dx12Device->CreateCommandList(
+			0,
+			D3D12_COMMAND_LIST_TYPE_DIRECT,
+			Base::Dx12CommandAllocator,
+			nullptr,
+			IID_PPV_ARGS(&Base::Dx12CommandList4)))) break;
+
+		//Command lists are created in the recording state. Since there is nothing to
+		//record right now and the main loop expects it to be closed, we close it.
+		Base::Dx12CommandList4->Close();
+
+		std::cout << "Command Queues setup successful\n";
+		return 0;
+
+	} while (false);
+	
+	std::cout << "Command Queues setup failed\n";
+	return 1;
+}
+
+
+int CreateSwapChain(HWND wndHandle)
+{
+	IDXGIFactory5* factory = nullptr;
+	CreateDXGIFactory(IID_PPV_ARGS(&factory));
+
+	//Create swap chain.
+	DXGI_SWAP_CHAIN_DESC1 scDesc = {};
+	scDesc.Width = 0;
+	scDesc.Height = 0;
+	scDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	scDesc.Stereo = FALSE;
+	scDesc.SampleDesc.Count = 1;
+	scDesc.SampleDesc.Quality = 0;
+	scDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+	scDesc.BufferCount = NUM_SWAP_BUFFERS;
+	scDesc.Scaling = DXGI_SCALING_NONE;
+	scDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+	scDesc.Flags = 0;
+	scDesc.AlphaMode = DXGI_ALPHA_MODE_UNSPECIFIED;
+
+	IDXGISwapChain1* swapChain1 = nullptr;
+	if (SUCCEEDED(factory->CreateSwapChainForHwnd(
+		Base::Dx12MainQueue,
+		wndHandle,
+		&scDesc,
+		nullptr,
+		nullptr,
+		&swapChain1)))
+	{
+		if (SUCCEEDED(swapChain1->QueryInterface(IID_PPV_ARGS(&Base::DxgiSwapChain4))))
+		{
+			Base::DxgiSwapChain4->Release();
+		}
+		else
+		{
+			std::cerr << "Error: Failed to get SwapChain4\n";
+			SafeRelease(&factory);
+			return 1;
+		}
+	}
+	else
+	{
+		std::cerr << "Error: Failed to create SwapChain1\n";
+		SafeRelease(&factory);
+		return 1;
+	}
+	std::cout << "SwapChain setup successful\n";
+	SafeRelease(&factory);
+	
+	return 0;
 }
