@@ -20,7 +20,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 #endif
 
 	MSG msg = { 0 };
-	HWND wndHandle = InitWindow(hInstance);			//1. Create Window
+	HWND wndHandle = InitWindow(hInstance);
 
 	do
 	{
