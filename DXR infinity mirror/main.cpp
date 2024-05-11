@@ -33,12 +33,6 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 				break;
 			}
 
-			SceneObject infiniMirror = LoadSceneObjectFile("mirrorTest.fbx");
-			if (infiniMirror.sceneObjectData == Scene_Object_Data_Null)
-			{
-				std::cerr << "Failed loading model test, exiting application\n";
-				break;
-			}
 			//		WaitForGpu();
 
 			ShowWindow(wndHandle, nCmdShow);

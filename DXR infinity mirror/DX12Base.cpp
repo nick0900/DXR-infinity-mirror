@@ -8,6 +8,7 @@
 #include "Settings.h"
 #include "GenericIncludes.h"
 #include "WindowsHelper.h"
+#include "SceneObject.h"
 
 namespace Base
 {
@@ -71,6 +72,7 @@ int CreateCommandInterfaces();
 int CreateSwapChain(HWND wndHandle);
 int CreateFenceAndEventHandle();
 int CreateRenderTargets();
+int CreateAccelerationStructures();
 
 int DX12Setup(HWND wndHandle)
 {
@@ -83,6 +85,13 @@ int DX12Setup(HWND wndHandle)
 	if (CreateFenceAndEventHandle() != 0) return 1;
 
 	//if (CreateRenderTargets()) return 1; //Not needed for pure raytracing
+
+	if (CreateAccelerationStructures() != 0) return 1;
+	//		CreateRaytracingPipelineState();
+	//		CreateShaderResources();
+
+			//last
+	//		CreateShaderTables();
 	
 	return 0;
 }
@@ -349,5 +358,96 @@ int CreateRenderTargets()
 		cdh.ptr += Base::Resources::Backbuffers::Dx12RTVDescriptorStride;
 	}
 	std::cout << "Backbuffer RTVs setup successful\n";
+	return 0;
+}
+
+static const D3D12_HEAP_PROPERTIES uploadHeapProperties =
+{
+	D3D12_HEAP_TYPE_UPLOAD,
+	D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+	D3D12_MEMORY_POOL_UNKNOWN,
+	0,
+	0,
+};
+
+static const D3D12_HEAP_PROPERTIES defaultHeapProps =
+{
+	D3D12_HEAP_TYPE_DEFAULT,
+	D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+	D3D12_MEMORY_POOL_UNKNOWN,
+	0,
+	0
+};
+
+ID3D12Resource1* createBuffer(uint64_t size, D3D12_RESOURCE_FLAGS flags, D3D12_RESOURCE_STATES initState, const D3D12_HEAP_PROPERTIES& heapProps)
+{
+	D3D12_RESOURCE_DESC bufDesc = {};
+	bufDesc.Alignment = 0;
+	bufDesc.DepthOrArraySize = 1;
+	bufDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+	bufDesc.Flags = flags;
+	bufDesc.Format = DXGI_FORMAT_UNKNOWN;
+	bufDesc.Height = 1;
+	bufDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+	bufDesc.MipLevels = 1;
+	bufDesc.SampleDesc.Count = 1;
+	bufDesc.SampleDesc.Quality = 0;
+	bufDesc.Width = size;
+
+	ID3D12Resource1* pBuffer = nullptr;
+	Base::Dx12Device->CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_NONE, &bufDesc, initState, nullptr, IID_PPV_ARGS(&pBuffer));
+	return pBuffer;
+}
+
+ID3D12Resource1* createTriangleVB(MeshGeometry* mesh)
+{
+	// For simplicity, we create the vertex buffer on the upload heap, but that's not required
+	ID3D12Resource1* pBuffer = createBuffer(sizeof(Vertex) * mesh->numVertecies, D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_GENERIC_READ, uploadHeapProperties);
+	uint8_t* pData;
+	pBuffer->Map(0, nullptr, (void**)&pData);
+	memcpy(pData, mesh->vertecies.get(), sizeof(Vertex) * mesh->numVertecies);
+	pBuffer->Unmap(0, nullptr);
+	return pBuffer;
+}
+
+ID3D12Resource1* createTriangleIB(MeshGeometry* mesh)
+{
+	// For simplicity, we create the index buffer on the upload heap, but that's not required
+	ID3D12Resource1* pBuffer = createBuffer(sizeof(uint32_t) * mesh->numIndecies, D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_GENERIC_READ, uploadHeapProperties);
+	uint8_t* pData;
+	pBuffer->Map(0, nullptr, (void**)&pData);
+	memcpy(pData, mesh->indecies.get(), sizeof(uint32_t) * mesh->numIndecies);
+	pBuffer->Unmap(0, nullptr);
+	return pBuffer;
+}
+
+int CreateAccelerationStructures()
+{
+	Base::Queues::Compute::Dx12CommandAllocator->Reset();
+	Base::Queues::Compute::Dx12CommandList4->Reset(Base::Queues::Compute::Dx12CommandAllocator, nullptr);
+
+	SceneObject infiniMirror = LoadSceneObjectFile("mirrorTest.fbx");
+	if (infiniMirror.sceneObjectData == Scene_Object_Data_Null)
+	{
+		std::cerr << "Error: Failed loading model test\n";
+		return 1;
+	}
+
+	ID3D12Resource1* mpVertexBuffer1 = createTriangleVB(&infiniMirror.meshGeometries[0]);
+	ID3D12Resource1* mpIndexBuffer1 = createTriangleIB(&infiniMirror.meshGeometries[0]);
+	ID3D12Resource1* mpVertexBuffer2 = createTriangleVB(&infiniMirror.meshGeometries[1]);
+	ID3D12Resource1* mpIndexBuffer2 = createTriangleIB(&infiniMirror.meshGeometries[1]);
+
+	//createBottomLevelAS(gDevice5, gCommandList4, mpVertexBuffer);
+	//createTopLevelAS(gDevice5, gCommandList4, gDXR_BottomBuffers.pResult);
+
+	//gCommandList4->Close();
+	//ID3D12CommandList* listsToExec[] = { gCommandList4 };
+	//gCommandQueue->ExecuteCommandLists(_countof(listsToExec), listsToExec);
+
+	//WaitForGpu();
+
+	//SafeRelease(mpVertexBuffer);
+
 	return 0;
 }
