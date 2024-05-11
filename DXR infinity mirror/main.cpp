@@ -4,6 +4,7 @@
 #include "Settings.h"
 #include "WindowsHelper.h"
 #include "DX12Base.h"
+#include "SceneObject.h"
 
 
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLine, int nCmdShow)
@@ -28,18 +29,16 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 		{
 			if (DX12Setup(wndHandle) != 0)
 			{
-				std::cerr << "Failed setup, exiting application\n";
+				std::cerr << "Failed DX12 and raytracing setup, exiting application\n";
 				break;
 			}
 
-			//		CreateAccelerationStructures();
-			//		CreateRaytracingPipelineState();
-			//		CreateShaderResources();
-
-					//last
-			//		CreateShaderTables();
-
-
+			SceneObject infiniMirror = LoadSceneObjectFile("mirrorTest.fbx");
+			if (infiniMirror.sceneObjectData == Scene_Object_Data_Null)
+			{
+				std::cerr << "Failed loading model test, exiting application\n";
+				break;
+			}
 			//		WaitForGpu();
 
 			ShowWindow(wndHandle, nCmdShow);
