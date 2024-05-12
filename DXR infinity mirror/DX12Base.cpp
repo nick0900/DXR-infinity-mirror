@@ -4,15 +4,42 @@
 #include <dxgi1_6.h>
 #pragma comment (lib, "d3d12.lib")
 #pragma comment (lib, "DXGI.lib")
+#include <DirectXMath.h>
+
 
 #include "Settings.h"
 #include "GenericIncludes.h"
 #include "WindowsHelper.h"
 #include "SceneObject.h"
 
+template<class Interface>
+inline void SafeRelease(Interface** ppInterfaceToRelease)
+{
+	if (*ppInterfaceToRelease != NULL)
+	{
+		(*ppInterfaceToRelease)->Release();
+
+		(*ppInterfaceToRelease) = NULL;
+	}
+}
+
+struct AccelerationStructureBuffers
+{
+	ID3D12Resource1* pScratch = nullptr;
+	ID3D12Resource1* pResult = nullptr;
+	ID3D12Resource1* pInstanceDesc = nullptr;    // Used only for top-level AS
+
+	~AccelerationStructureBuffers()
+	{
+		SafeRelease(&pScratch);
+		SafeRelease(&pResult);
+		SafeRelease(&pInstanceDesc);
+	}
+};
+
 namespace Base
 {
-	ID3D12Device* Dx12Device;
+	ID3D12Device5* Dx12Device;
 	IDXGISwapChain4* DxgiSwapChain4;
 	
 	namespace Queues
@@ -49,17 +76,32 @@ namespace Base
 			ID3D12Resource1* Dx12RTVResources[NUM_SWAP_BUFFERS];
 		}
 
+		namespace DXR
+		{
+			AccelerationStructureBuffers BottomBuffers;
+
+			uint64_t ConservativeTopSize;
+			AccelerationStructureBuffers TopBuffers;
+		}
 	}
 }
 
-template<class Interface>
-inline void SafeRelease(Interface** ppInterfaceToRelease)
+void WaitForCompute()
 {
-	if (*ppInterfaceToRelease != NULL)
-	{
-		(*ppInterfaceToRelease)->Release();
+	//WAITING FOR EACH FRAME TO COMPLETE BEFORE CONTINUING IS NOT BEST PRACTICE.
+	//This is code implemented as such for simplicity. The cpu could for example be used
+	//for other tasks to prepare the next frame while the current one is being rendered.
 
-		(*ppInterfaceToRelease) = NULL;
+	//Signal and increment the fence value.
+	const UINT64 fence = Base::Synchronization::Dx12FenceValue;
+	Base::Queues::Compute::Dx12Queue->Signal(Base::Synchronization::Dx12Fence, fence);
+	Base::Synchronization::Dx12FenceValue++;
+
+	//Wait until command queue is done.
+	if (Base::Synchronization::Dx12Fence->GetCompletedValue() < fence)
+	{
+		Base::Synchronization::Dx12Fence->SetEventOnCompletion(fence, Base::Synchronization::Dx12FenceEvent);
+		WaitForSingleObject(Base::Synchronization::Dx12FenceEvent, INFINITE);
 	}
 }
 
@@ -421,6 +463,116 @@ ID3D12Resource1* createTriangleIB(MeshGeometry* mesh)
 	return pBuffer;
 }
 
+void createBottomLevelAS(ID3D12GraphicsCommandList4* pCmdList, D3D12_RAYTRACING_GEOMETRY_DESC* geomDesc, uint32_t numDescs)
+{
+	// Get the size requirements for the scratch and AS buffers
+	D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS inputs = {};
+	inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
+	inputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_NONE;
+	inputs.NumDescs = numDescs;
+	inputs.pGeometryDescs = geomDesc;
+	inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL;
+
+	D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO info = {};
+	Base::Dx12Device->GetRaytracingAccelerationStructurePrebuildInfo(&inputs, &info);
+
+	// Create the buffers. They need to support UAV, and since we are going to immediately use them, we create them with an unordered-access state
+
+	Base::Resources::DXR::BottomBuffers.pScratch = createBuffer(info.ScratchDataSizeInBytes, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, defaultHeapProps);
+	Base::Resources::DXR::BottomBuffers.pResult = createBuffer(info.ResultDataMaxSizeInBytes, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE, defaultHeapProps);
+
+	// Create the bottom-level AS
+	D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC asDesc = {};
+	asDesc.Inputs = inputs;
+	asDesc.DestAccelerationStructureData = Base::Resources::DXR::BottomBuffers.pResult->GetGPUVirtualAddress();
+	asDesc.ScratchAccelerationStructureData = Base::Resources::DXR::BottomBuffers.pScratch->GetGPUVirtualAddress();
+
+	pCmdList->BuildRaytracingAccelerationStructure(&asDesc, 0, nullptr);
+
+	// We need to insert a UAV barrier before using the acceleration structures in a raytracing operation
+	D3D12_RESOURCE_BARRIER uavBarrier = {};
+	uavBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+	uavBarrier.UAV.pResource = Base::Resources::DXR::BottomBuffers.pResult;
+	pCmdList->ResourceBarrier(1, &uavBarrier);
+}
+
+void createTopLevelAS(ID3D12GraphicsCommandList4* pCmdList, ID3D12Resource1* pBottomLevelAS)
+{
+	uint32_t instanceCount = 3;
+
+	// First, get the size of the TLAS buffers and create them
+	D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS inputs = {};
+	inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
+	inputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_NONE;
+	inputs.NumDescs = instanceCount;
+	inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL;
+
+	// on first call, create the buffer
+	if (Base::Resources::DXR::TopBuffers.pInstanceDesc == nullptr)
+	{
+		D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO info;
+		Base::Dx12Device->GetRaytracingAccelerationStructurePrebuildInfo(&inputs, &info);
+
+		// Create the buffers
+		if (Base::Resources::DXR::TopBuffers.pScratch == nullptr)
+		{
+			Base::Resources::DXR::TopBuffers.pScratch = createBuffer(info.ScratchDataSizeInBytes, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, defaultHeapProps);
+		}
+
+		if (Base::Resources::DXR::TopBuffers.pResult == nullptr)
+		{
+			Base::Resources::DXR::TopBuffers.pResult = createBuffer(info.ResultDataMaxSizeInBytes, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE, defaultHeapProps);
+		}
+		Base::Resources::DXR::ConservativeTopSize = info.ResultDataMaxSizeInBytes;
+
+		Base::Resources::DXR::TopBuffers.pInstanceDesc = createBuffer(
+			sizeof(D3D12_RAYTRACING_INSTANCE_DESC) * instanceCount,
+			D3D12_RESOURCE_FLAG_NONE,
+			D3D12_RESOURCE_STATE_GENERIC_READ,
+			uploadHeapProperties);
+	}
+
+	D3D12_RAYTRACING_INSTANCE_DESC* pInstanceDesc;
+	Base::Resources::DXR::TopBuffers.pInstanceDesc->Map(0, nullptr, (void**)&pInstanceDesc);
+
+	static float rotY = 0;
+	rotY += 0.001f;
+	for (int i = 0; i < instanceCount; i++)
+	{
+		pInstanceDesc->InstanceID = i;                            // exposed to the shader via InstanceID()
+		pInstanceDesc->InstanceContributionToHitGroupIndex = i;   // offset inside the shader-table. we only have a single geometry, so the offset 0
+		pInstanceDesc->Flags = D3D12_RAYTRACING_INSTANCE_FLAG_NONE;
+
+		
+		//apply transform
+		DirectX::XMFLOAT3X4 m;
+		DirectX::XMStoreFloat3x4(&m, DirectX::XMMatrixRotationY(i * 0.25f + rotY) * DirectX::XMMatrixTranslation(-2.0f + i * 2, 0, 0));
+		memcpy(pInstanceDesc->Transform, &m, sizeof(pInstanceDesc->Transform));
+
+		pInstanceDesc->AccelerationStructure = pBottomLevelAS->GetGPUVirtualAddress();
+		pInstanceDesc->InstanceMask = 0xFF;
+
+		pInstanceDesc++;
+	}
+	// Unmap
+	Base::Resources::DXR::TopBuffers.pInstanceDesc->Unmap(0, nullptr);
+
+	// Create the TLAS
+	D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC asDesc = {};
+	asDesc.Inputs = inputs;
+	asDesc.Inputs.InstanceDescs = Base::Resources::DXR::TopBuffers.pInstanceDesc->GetGPUVirtualAddress();
+	asDesc.DestAccelerationStructureData = Base::Resources::DXR::TopBuffers.pResult->GetGPUVirtualAddress();
+	asDesc.ScratchAccelerationStructureData = Base::Resources::DXR::TopBuffers.pScratch->GetGPUVirtualAddress();
+
+	pCmdList->BuildRaytracingAccelerationStructure(&asDesc, 0, nullptr);
+
+	// UAV barrier needed before using the acceleration structures in a raytracing operation
+	D3D12_RESOURCE_BARRIER uavBarrier = {};
+	uavBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+	uavBarrier.UAV.pResource = Base::Resources::DXR::TopBuffers.pResult;
+	pCmdList->ResourceBarrier(1, &uavBarrier);
+}
+
 int CreateAccelerationStructures()
 {
 	Base::Queues::Compute::Dx12CommandAllocator->Reset();
@@ -438,16 +590,47 @@ int CreateAccelerationStructures()
 	ID3D12Resource1* mpVertexBuffer2 = createTriangleVB(&infiniMirror.meshGeometries[1]);
 	ID3D12Resource1* mpIndexBuffer2 = createTriangleIB(&infiniMirror.meshGeometries[1]);
 
-	//createBottomLevelAS(gDevice5, gCommandList4, mpVertexBuffer);
-	//createTopLevelAS(gDevice5, gCommandList4, gDXR_BottomBuffers.pResult);
+	D3D12_RAYTRACING_GEOMETRY_DESC geomDesc[2] = {};
+	geomDesc[0].Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
 
-	//gCommandList4->Close();
-	//ID3D12CommandList* listsToExec[] = { gCommandList4 };
-	//gCommandQueue->ExecuteCommandLists(_countof(listsToExec), listsToExec);
+	geomDesc[0].Triangles.VertexBuffer.StartAddress = mpVertexBuffer1->GetGPUVirtualAddress();
+	geomDesc[0].Triangles.VertexBuffer.StrideInBytes = sizeof(Vertex);
+	geomDesc[0].Triangles.VertexFormat = DXGI_FORMAT_R32G32B32_FLOAT;
+	geomDesc[0].Triangles.VertexCount = infiniMirror.meshGeometries[0].numVertecies;
 
-	//WaitForGpu();
+	geomDesc[0].Triangles.IndexBuffer = mpIndexBuffer1->GetGPUVirtualAddress();
+	geomDesc[0].Triangles.IndexFormat = DXGI_FORMAT_R32_UINT;
+	geomDesc[0].Triangles.IndexCount = infiniMirror.meshGeometries[0].numIndecies;
 
-	//SafeRelease(mpVertexBuffer);
+	geomDesc[0].Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
 
+	geomDesc[1].Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
+
+	geomDesc[1].Triangles.VertexBuffer.StartAddress = mpVertexBuffer2->GetGPUVirtualAddress();
+	geomDesc[1].Triangles.VertexBuffer.StrideInBytes = sizeof(Vertex);
+	geomDesc[1].Triangles.VertexFormat = DXGI_FORMAT_R32G32B32_FLOAT;
+	geomDesc[1].Triangles.VertexCount = infiniMirror.meshGeometries[1].numVertecies;
+
+	geomDesc[1].Triangles.IndexBuffer = mpIndexBuffer2->GetGPUVirtualAddress();
+	geomDesc[1].Triangles.IndexFormat = DXGI_FORMAT_R32_UINT;
+	geomDesc[1].Triangles.IndexCount = infiniMirror.meshGeometries[1].numIndecies;
+
+	geomDesc[1].Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
+
+	createBottomLevelAS(Base::Queues::Compute::Dx12CommandList4, geomDesc, ARRAYSIZE(geomDesc));
+	createTopLevelAS(Base::Queues::Compute::Dx12CommandList4, Base::Resources::DXR::BottomBuffers.pResult);
+
+	Base::Queues::Compute::Dx12CommandList4->Close();
+	ID3D12CommandList* listsToExec[] = { Base::Queues::Compute::Dx12CommandList4 };
+	Base::Queues::Compute::Dx12Queue->ExecuteCommandLists(_countof(listsToExec), listsToExec);
+
+	WaitForCompute();
+
+	SafeRelease(&mpVertexBuffer1);
+	SafeRelease(&mpVertexBuffer2);
+	SafeRelease(&mpIndexBuffer1);
+	SafeRelease(&mpIndexBuffer2);
+
+	std::cout << "DXR Acceleration Structures setup successful\n"
 	return 0;
 }
