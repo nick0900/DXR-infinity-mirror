@@ -11,6 +11,7 @@
 #include "GenericIncludes.h"
 #include "WindowsHelper.h"
 #include "SceneObject.h"
+#include "ShaderCompiler.h"
 
 template<class Interface>
 inline void SafeRelease(Interface** ppInterfaceToRelease)
@@ -83,6 +84,16 @@ namespace Base
 			uint64_t ConservativeTopSize;
 			AccelerationStructureBuffers TopBuffers;
 		}
+
+		namespace RootSignatures
+		{
+			ID3D12RootSignature* GlobalRS;
+		}
+	}
+
+	namespace States
+	{
+		ID3D12StateObject* DXRPipelineState;
 	}
 }
 
@@ -115,6 +126,7 @@ int CreateSwapChain(HWND wndHandle);
 int CreateFenceAndEventHandle();
 int CreateRenderTargets();
 int CreateAccelerationStructures();
+int CreateRaytracingPipelineState();
 
 int DX12Setup(HWND wndHandle)
 {
@@ -129,7 +141,8 @@ int DX12Setup(HWND wndHandle)
 	//if (CreateRenderTargets()) return 1; //Not needed for pure raytracing
 
 	if (CreateAccelerationStructures() != 0) return 1;
-	//		CreateRaytracingPipelineState();
+
+	if (CreateRaytracingPipelineState() != 0) return 1;
 	//		CreateShaderResources();
 
 			//last
@@ -634,3 +647,305 @@ int CreateAccelerationStructures()
 	std::cout << "DXR Acceleration Structures setup successful\n";
 	return 0;
 }
+
+ID3D12RootSignature* createRayGenLocalRootSignature()
+{
+	D3D12_DESCRIPTOR_RANGE range[2]{};
+	D3D12_ROOT_PARAMETER rootParams[1]{};
+
+	range[0].BaseShaderRegister = 0;
+	range[0].NumDescriptors = 1;
+	range[0].RegisterSpace = 0;
+	range[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
+	range[0].OffsetInDescriptorsFromTableStart = 0;
+
+	// gRtScene
+	range[1].BaseShaderRegister = 0;
+	range[1].NumDescriptors = 1;
+	range[1].RegisterSpace = 0;
+	range[1].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+	range[1].OffsetInDescriptorsFromTableStart = 1;
+
+	rootParams[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+	rootParams[0].DescriptorTable.NumDescriptorRanges = _countof(range);
+	rootParams[0].DescriptorTable.pDescriptorRanges = range;
+
+	// Create the desc
+	D3D12_ROOT_SIGNATURE_DESC desc = {};
+	desc.NumParameters = _countof(rootParams);
+	desc.pParameters = rootParams;
+	desc.Flags = D3D12_ROOT_SIGNATURE_FLAG_LOCAL_ROOT_SIGNATURE;
+
+
+	ID3DBlob* pSigBlob = nullptr;
+	ID3DBlob* pErrorBlob = nullptr;
+	HRESULT hr = D3D12SerializeRootSignature(&desc, D3D_ROOT_SIGNATURE_VERSION_1, &pSigBlob, &pErrorBlob);
+	if (FAILED(hr))
+	{
+		MessageBoxA(0, (char*)pErrorBlob->GetBufferPointer(), "", 0);
+		//std::string msg = convertBlobToString(pErrorBlob.GetInterfacePtr());
+		//logError(msg);
+		return nullptr;
+	}
+	ID3D12RootSignature* pRootSig;
+	Base::Dx12Device->CreateRootSignature(0, pSigBlob->GetBufferPointer(), pSigBlob->GetBufferSize(), IID_PPV_ARGS(&pRootSig));
+
+	return pRootSig;
+}
+
+ID3D12RootSignature* createHitGroupLocalRootSignature()
+{
+	D3D12_ROOT_PARAMETER rootParams[1]{};
+
+	//float3 ShaderTableColor;
+	rootParams[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+	rootParams[0].Constants.RegisterSpace = 1;
+	rootParams[0].Constants.ShaderRegister = 0;
+	rootParams[0].Constants.Num32BitValues = 3;
+
+	D3D12_ROOT_SIGNATURE_DESC desc = {};
+	desc.NumParameters = _countof(rootParams);
+	desc.pParameters = rootParams;
+	desc.Flags = D3D12_ROOT_SIGNATURE_FLAG_LOCAL_ROOT_SIGNATURE;
+
+
+	ID3DBlob* pSigBlob;
+	ID3DBlob* pErrorBlob;
+	HRESULT hr = D3D12SerializeRootSignature(&desc, D3D_ROOT_SIGNATURE_VERSION_1, &pSigBlob, &pErrorBlob);
+	if (FAILED(hr))
+	{
+		//std::string msg = convertBlobToString(pErrorBlob.GetInterfacePtr());
+		//logError(msg);
+		return nullptr;
+	}
+	ID3D12RootSignature* pRootSig;
+	Base::Dx12Device->CreateRootSignature(0, pSigBlob->GetBufferPointer(), pSigBlob->GetBufferSize(), IID_PPV_ARGS(&pRootSig));
+
+	return pRootSig;
+}
+
+ID3D12RootSignature* createMissLocalRootSignature()
+{
+	D3D12_ROOT_SIGNATURE_DESC desc{};
+	desc.NumParameters = 0;
+	desc.pParameters = nullptr;
+	desc.Flags = D3D12_ROOT_SIGNATURE_FLAG_LOCAL_ROOT_SIGNATURE;
+
+	ID3DBlob* pSigBlob;
+	ID3DBlob* pErrorBlob;
+	HRESULT hr = D3D12SerializeRootSignature(&desc, D3D_ROOT_SIGNATURE_VERSION_1, &pSigBlob, &pErrorBlob);
+	if (FAILED(hr))
+	{
+		//std::string msg = convertBlobToString(pErrorBlob.GetInterfacePtr());
+		//logError(msg);
+		return nullptr;
+	}
+	ID3D12RootSignature* pRootSig;
+	Base::Dx12Device->CreateRootSignature(0, pSigBlob->GetBufferPointer(), pSigBlob->GetBufferSize(), IID_PPV_ARGS(&pRootSig));
+
+	return pRootSig;
+}
+
+ID3D12RootSignature* createGlobalRootSignature()
+{
+	D3D12_ROOT_PARAMETER rootParams[1]{};
+
+	//float3 ShaderTableColor;
+	rootParams[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+	rootParams[0].Constants.RegisterSpace = 0;
+	rootParams[0].Constants.ShaderRegister = 0;
+	rootParams[0].Constants.Num32BitValues = 1;
+
+	D3D12_ROOT_SIGNATURE_DESC desc = {};
+	desc.NumParameters = _countof(rootParams);
+	desc.pParameters = rootParams;
+	desc.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
+
+	ID3DBlob* pSigBlob;
+	ID3DBlob* pErrorBlob;
+	HRESULT hr = D3D12SerializeRootSignature(&desc, D3D_ROOT_SIGNATURE_VERSION_1, &pSigBlob, &pErrorBlob);
+	if (FAILED(hr))
+	{
+		//std::string msg = convertBlobToString(pErrorBlob.GetInterfacePtr());
+		//logError(msg);
+		return nullptr;
+	}
+	ID3D12RootSignature* pRootSig;
+	Base::Dx12Device->CreateRootSignature(0, pSigBlob->GetBufferPointer(), pSigBlob->GetBufferSize(), IID_PPV_ARGS(&pRootSig));
+
+	return pRootSig;
+}
+
+const WCHAR* sRayGen = L"rayGen";
+const WCHAR* sClosestHit = L"closestHit";
+const WCHAR* sMiss = L"miss";
+const WCHAR* sHitGroup = L"HitGroup";
+int CreateRaytracingPipelineState()
+{
+	D3D12_STATE_SUBOBJECT soMem[100]{};
+	UINT numSubobjects = 0;
+	auto nextSubobject = [&]()
+	{
+		return soMem + numSubobjects++;
+	};
+
+	ShaderCompiler dxilCompiler;
+	dxilCompiler.init();
+
+	ShaderCompilationDesc shaderDesc;
+
+	//D3DCOMPILE_IEEE_STRICTNESS
+	shaderDesc.CompileArguments.push_back(L"/Gis");
+
+	//Vertex shader
+	shaderDesc.FilePath = L"RayTracingShaders.hlsl";
+	shaderDesc.EntryPoint = L"";
+	shaderDesc.TargetProfile = L"lib_6_3";
+
+	IDxcBlob* pShaders = nullptr;
+	dxilCompiler.compileFromFile(&shaderDesc, &pShaders);
+
+	//Init DXIL subobject
+	D3D12_EXPORT_DESC dxilExports[] = {
+		sRayGen, nullptr, D3D12_EXPORT_FLAG_NONE,
+		sClosestHit, nullptr, D3D12_EXPORT_FLAG_NONE,
+		sMiss, nullptr, D3D12_EXPORT_FLAG_NONE,
+	};
+	D3D12_DXIL_LIBRARY_DESC dxilLibraryDesc;
+	dxilLibraryDesc.DXILLibrary.pShaderBytecode = pShaders->GetBufferPointer();
+	dxilLibraryDesc.DXILLibrary.BytecodeLength = pShaders->GetBufferSize();
+	dxilLibraryDesc.pExports = dxilExports;
+	dxilLibraryDesc.NumExports = _countof(dxilExports);
+
+	D3D12_STATE_SUBOBJECT* soDXIL = nextSubobject();
+	soDXIL->Type = D3D12_STATE_SUBOBJECT_TYPE_DXIL_LIBRARY;
+	soDXIL->pDesc = &dxilLibraryDesc;
+
+
+	//Init hit group
+	D3D12_HIT_GROUP_DESC hitGroupDesc;
+	hitGroupDesc.AnyHitShaderImport = nullptr;
+	hitGroupDesc.ClosestHitShaderImport = sClosestHit;
+	hitGroupDesc.HitGroupExport = sHitGroup;
+	hitGroupDesc.IntersectionShaderImport = nullptr;
+	hitGroupDesc.Type = D3D12_HIT_GROUP_TYPE_TRIANGLES;
+
+	D3D12_STATE_SUBOBJECT* soHitGroup = nextSubobject();
+	soHitGroup->Type = D3D12_STATE_SUBOBJECT_TYPE_HIT_GROUP;
+	soHitGroup->pDesc = &hitGroupDesc;
+
+	//Init rayGen local root signature
+	ID3D12RootSignature* rayGenLocalRoot = createRayGenLocalRootSignature();
+	D3D12_STATE_SUBOBJECT* soRayGenLocalRoot = nextSubobject();
+	soRayGenLocalRoot->Type = D3D12_STATE_SUBOBJECT_TYPE_LOCAL_ROOT_SIGNATURE;
+	soRayGenLocalRoot->pDesc = &rayGenLocalRoot;
+
+	//Bind local root signature to rayGen shader
+	D3D12_SUBOBJECT_TO_EXPORTS_ASSOCIATION rayGenLocalRootAssociation;
+	LPCWSTR rayGenLocalRootAssociationShaderNames[] = { sRayGen };
+	rayGenLocalRootAssociation.pExports = rayGenLocalRootAssociationShaderNames;
+	rayGenLocalRootAssociation.NumExports = _countof(rayGenLocalRootAssociationShaderNames);
+	rayGenLocalRootAssociation.pSubobjectToAssociate = soRayGenLocalRoot; //<-- address to local root subobject
+
+	D3D12_STATE_SUBOBJECT* soRayGenLocalRootAssociation = nextSubobject();
+	soRayGenLocalRootAssociation->Type = D3D12_STATE_SUBOBJECT_TYPE_SUBOBJECT_TO_EXPORTS_ASSOCIATION;
+	soRayGenLocalRootAssociation->pDesc = &rayGenLocalRootAssociation;
+
+
+	//Init hit group local root signature
+	ID3D12RootSignature* hitGroupLocalRoot = createHitGroupLocalRootSignature();
+	D3D12_STATE_SUBOBJECT* soHitGroupLocalRoot = nextSubobject();
+	soHitGroupLocalRoot->Type = D3D12_STATE_SUBOBJECT_TYPE_LOCAL_ROOT_SIGNATURE;
+	soHitGroupLocalRoot->pDesc = &hitGroupLocalRoot;
+
+
+	//Bind local root signature to hit group shaders
+	D3D12_SUBOBJECT_TO_EXPORTS_ASSOCIATION hitGroupLocalRootAssociation;
+	LPCWSTR hitGroupLocalRootAssociationShaderNames[] = { sClosestHit };
+	hitGroupLocalRootAssociation.pExports = hitGroupLocalRootAssociationShaderNames;
+	hitGroupLocalRootAssociation.NumExports = _countof(hitGroupLocalRootAssociationShaderNames);
+	hitGroupLocalRootAssociation.pSubobjectToAssociate = soHitGroupLocalRoot; //<-- address to local root subobject
+
+	D3D12_STATE_SUBOBJECT* soHitGroupLocalRootAssociation = nextSubobject();
+	soHitGroupLocalRootAssociation->Type = D3D12_STATE_SUBOBJECT_TYPE_SUBOBJECT_TO_EXPORTS_ASSOCIATION;
+	soHitGroupLocalRootAssociation->pDesc = &hitGroupLocalRootAssociation;
+
+
+	//Init miss local root signature
+	ID3D12RootSignature* missLocalRoot = createMissLocalRootSignature();
+	D3D12_STATE_SUBOBJECT* soMissLocalRoot = nextSubobject();
+	soMissLocalRoot->Type = D3D12_STATE_SUBOBJECT_TYPE_LOCAL_ROOT_SIGNATURE;
+	soMissLocalRoot->pDesc = &missLocalRoot;
+
+
+	//Bind local root signature to miss shader
+	D3D12_SUBOBJECT_TO_EXPORTS_ASSOCIATION missLocalRootAssociation;
+	LPCWSTR missLocalRootAssociationShaderNames[] = { sMiss };
+	missLocalRootAssociation.pExports = missLocalRootAssociationShaderNames;
+	missLocalRootAssociation.NumExports = _countof(missLocalRootAssociationShaderNames);
+	missLocalRootAssociation.pSubobjectToAssociate = soMissLocalRoot; //<-- address to local root subobject
+
+	D3D12_STATE_SUBOBJECT* soMissLocalRootAssociation = nextSubobject();
+	soMissLocalRootAssociation->Type = D3D12_STATE_SUBOBJECT_TYPE_SUBOBJECT_TO_EXPORTS_ASSOCIATION;
+	soMissLocalRootAssociation->pDesc = &missLocalRootAssociation;
+
+
+	//Init shader config
+	D3D12_RAYTRACING_SHADER_CONFIG shaderConfig = {};
+	shaderConfig.MaxAttributeSizeInBytes = sizeof(float) * 2;
+	shaderConfig.MaxPayloadSizeInBytes = sizeof(float) * 3;
+
+	D3D12_STATE_SUBOBJECT* soShaderConfig = nextSubobject();
+	soShaderConfig->Type = D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_SHADER_CONFIG;
+	soShaderConfig->pDesc = &shaderConfig;
+
+	//Bind the payload size to the programs
+	D3D12_SUBOBJECT_TO_EXPORTS_ASSOCIATION shaderConfigAssociation;
+	const WCHAR* shaderNamesToConfig[] = { sMiss, sClosestHit, sRayGen };
+	shaderConfigAssociation.pExports = shaderNamesToConfig;
+	shaderConfigAssociation.NumExports = _countof(shaderNamesToConfig);
+	shaderConfigAssociation.pSubobjectToAssociate = soShaderConfig; //<-- address to shader config subobject
+
+	D3D12_STATE_SUBOBJECT* soShaderConfigAssociation = nextSubobject();
+	soShaderConfigAssociation->Type = D3D12_STATE_SUBOBJECT_TYPE_SUBOBJECT_TO_EXPORTS_ASSOCIATION;
+	soShaderConfigAssociation->pDesc = &shaderConfigAssociation;
+
+
+	//Init pipeline config
+	D3D12_RAYTRACING_PIPELINE_CONFIG pipelineConfig;
+	pipelineConfig.MaxTraceRecursionDepth = 1;
+
+	D3D12_STATE_SUBOBJECT* soPipelineConfig = nextSubobject();
+	soPipelineConfig->Type = D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_PIPELINE_CONFIG;
+	soPipelineConfig->pDesc = &pipelineConfig;
+
+
+
+	//Init global root signature
+	Base::Resources::RootSignatures::GlobalRS = createGlobalRootSignature();
+
+	D3D12_STATE_SUBOBJECT* soGlobalRoot = nextSubobject();
+	soGlobalRoot->Type = D3D12_STATE_SUBOBJECT_TYPE_GLOBAL_ROOT_SIGNATURE;
+	soGlobalRoot->pDesc = &Base::Resources::RootSignatures::GlobalRS;
+
+
+	// Create the state
+	D3D12_STATE_OBJECT_DESC desc;
+	desc.NumSubobjects = numSubobjects;
+	desc.pSubobjects = soMem;
+	desc.Type = D3D12_STATE_OBJECT_TYPE_RAYTRACING_PIPELINE;
+
+	HRESULT hr = Base::Dx12Device->CreateStateObject(&desc, IID_PPV_ARGS(&Base::States::DXRPipelineState));
+
+
+	//release local root signatures
+	SafeRelease(&rayGenLocalRoot);
+	SafeRelease(&hitGroupLocalRoot);
+	SafeRelease(&missLocalRoot);
+
+	std::cout << "Ray tracing pipeline state setup\n";
+	return 0;
+}
+
+
+

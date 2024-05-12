@@ -169,6 +169,7 @@
     <ClCompile Include="DX12Base.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="SceneObject.cpp" />
+    <ClCompile Include="ShaderCompiler.cpp" />
     <ClCompile Include="Transform.cpp" />
     <ClCompile Include="WindowsHelper.cpp" />
   </ItemGroup>
@@ -176,9 +177,20 @@
     <ClInclude Include="DX12Base.h" />
     <ClInclude Include="GenericIncludes.h" />
     <ClInclude Include="SceneObject.h" />
+    <ClInclude Include="ShaderCompiler.h" />
+    <ClInclude Include="stdafx.h" />
     <ClInclude Include="Transform.h" />
     <ClInclude Include="Settings.h" />
     <ClInclude Include="WindowsHelper.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="RayTracingShaders.hlsl">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">false</ExcludedFromBuild>
+      <FileType>Document</FileType>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">false</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</ExcludedFromBuild>
+    </None>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
