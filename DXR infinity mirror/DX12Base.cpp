@@ -256,7 +256,7 @@ int CreateCommandInterfaces()
 		if (FAILED(Base::Dx12Device->CreateCommandQueue(&cqd, IID_PPV_ARGS(&Base::Queues::Direct::Dx12Queue)))) break;
 		NameInterface(Base::Queues::Direct::Dx12Queue);
 
-		cqd.Type = D3D12_COMMAND_LIST_TYPE_COPY;
+		cqd.Type = D3D12_COMMAND_LIST_TYPE_COMPUTE;
 		if (FAILED(Base::Dx12Device->CreateCommandQueue(&cqd, IID_PPV_ARGS(&Base::Queues::Compute::Dx12Queue)))) break;
 		NameInterface(Base::Queues::Compute::Dx12Queue);
 
@@ -265,7 +265,7 @@ int CreateCommandInterfaces()
 		if (FAILED(Base::Dx12Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&Base::Queues::Direct::Dx12CommandAllocator)))) break;
 		NameInterface(Base::Queues::Direct::Dx12CommandAllocator);
 
-		if (FAILED(Base::Dx12Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&Base::Queues::Compute::Dx12CommandAllocator)))) break;
+		if (FAILED(Base::Dx12Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS(&Base::Queues::Compute::Dx12CommandAllocator)))) break;
 		NameInterface(Base::Queues::Compute::Dx12CommandAllocator);
 
 		//Create command list.
@@ -279,7 +279,7 @@ int CreateCommandInterfaces()
 
 		if (FAILED(Base::Dx12Device->CreateCommandList(
 			0,
-			D3D12_COMMAND_LIST_TYPE_DIRECT,
+			D3D12_COMMAND_LIST_TYPE_COMPUTE,
 			Base::Queues::Compute::Dx12CommandAllocator,
 			nullptr,
 			IID_PPV_ARGS(&Base::Queues::Compute::Dx12CommandList4)))) break;
