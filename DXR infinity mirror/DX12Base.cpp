@@ -631,6 +631,6 @@ int CreateAccelerationStructures()
 	SafeRelease(&mpIndexBuffer1);
 	SafeRelease(&mpIndexBuffer2);
 
-	std::cout << "DXR Acceleration Structures setup successful\n"
+	std::cout << "DXR Acceleration Structures setup successful\n";
 	return 0;
 }
