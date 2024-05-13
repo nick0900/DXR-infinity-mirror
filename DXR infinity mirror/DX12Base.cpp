@@ -13,6 +13,11 @@
 #include "SceneObject.h"
 #include "ShaderCompiler.h"
 
+const WCHAR* sRayGen = RAY_GEN_SHADER_NAME;
+const WCHAR* sClosestHit = CLOSEST_HIT_SHADER_NAME;
+const WCHAR* sMiss = MISS_SHADER_NAME;
+const WCHAR* sHitGroup = HIT_GROUP_SHADER_NAME;
+
 template<class Interface>
 inline void SafeRelease(Interface** ppInterfaceToRelease)
 {
@@ -35,6 +40,18 @@ struct AccelerationStructureBuffers
 		SafeRelease(&pScratch);
 		SafeRelease(&pResult);
 		SafeRelease(&pInstanceDesc);
+	}
+};
+
+struct ShaderTableData
+{
+	UINT64 SizeInBytes;
+	UINT32 StrideInBytes;
+	ID3D12Resource1* Resource = nullptr;
+
+	~ShaderTableData()
+	{
+		SafeRelease(&Resource);
 	}
 };
 
@@ -79,10 +96,10 @@ namespace Base
 
 		namespace DXR
 		{
-			AccelerationStructureBuffers BottomBuffers;
+			AccelerationStructureBuffers BottomBuffers{};
 
 			uint64_t ConservativeTopSize;
-			AccelerationStructureBuffers TopBuffers;
+			AccelerationStructureBuffers TopBuffers{};
 
 			ID3D12RootSignature* Dx12GlobalRS;
 
@@ -90,6 +107,10 @@ namespace Base
 			ID3D12Resource1* Dx12OutputResource;
 			D3D12_CPU_DESCRIPTOR_HANDLE Dx12OutputUAV_CPUHandle;
 			D3D12_CPU_DESCRIPTOR_HANDLE Dx12Accelleration_CPUHandle;
+
+			ShaderTableData RayGenShaderTable{};
+			ShaderTableData MissShaderTable{};
+			ShaderTableData HitGroupShaderTable{};
 		}
 	}
 
@@ -130,6 +151,7 @@ int CreateRenderTargets();
 int CreateAccelerationStructures();
 int CreateRaytracingPipelineState();
 int CreateShaderResources();
+int CreateShaderTables();
 
 int DX12Setup(HWND wndHandle)
 {
@@ -149,18 +171,18 @@ int DX12Setup(HWND wndHandle)
 
 	if (CreateShaderResources() != 0) return 1;
 
-			//last
-	//		CreateShaderTables();
+	//last
+	if (CreateShaderTables() != 0) return 1;
 	
 	return 0;
 }
 
 void DX12Free()
 {
-	//SafeRelease(&mpOutputResource);
-	//SafeRelease(&gRTDescriptorHeap);
-	//SafeRelease(&gRTPipelineState);
-	//SafeRelease(&gGlobalRootSig);
+	SafeRelease(&Base::Resources::DXR::Dx12OutputResource);
+	SafeRelease(&Base::Resources::DXR::Dx12RTDescriptorHeap);
+	SafeRelease(&Base::States::DXRPipelineState);
+	SafeRelease(&Base::Resources::DXR::Dx12GlobalRS);
 
 
 	SafeRelease(&Base::Resources::Backbuffers::Dx12RTVDescriptorHeap);
@@ -515,13 +537,11 @@ void createBottomLevelAS(ID3D12GraphicsCommandList4* pCmdList, D3D12_RAYTRACING_
 
 void createTopLevelAS(ID3D12GraphicsCommandList4* pCmdList, ID3D12Resource1* pBottomLevelAS)
 {
-	uint32_t instanceCount = 3;
-
 	// First, get the size of the TLAS buffers and create them
 	D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS inputs = {};
 	inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
 	inputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_NONE;
-	inputs.NumDescs = instanceCount;
+	inputs.NumDescs = OBJECT_INSTANCES;
 	inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL;
 
 	// on first call, create the buffer
@@ -543,7 +563,7 @@ void createTopLevelAS(ID3D12GraphicsCommandList4* pCmdList, ID3D12Resource1* pBo
 		Base::Resources::DXR::ConservativeTopSize = info.ResultDataMaxSizeInBytes;
 
 		Base::Resources::DXR::TopBuffers.pInstanceDesc = createBuffer(
-			sizeof(D3D12_RAYTRACING_INSTANCE_DESC) * instanceCount,
+			sizeof(D3D12_RAYTRACING_INSTANCE_DESC) * OBJECT_INSTANCES,
 			D3D12_RESOURCE_FLAG_NONE,
 			D3D12_RESOURCE_STATE_GENERIC_READ,
 			uploadHeapProperties);
@@ -554,7 +574,7 @@ void createTopLevelAS(ID3D12GraphicsCommandList4* pCmdList, ID3D12Resource1* pBo
 
 	static float rotY = 0;
 	rotY += 0.001f;
-	for (int i = 0; i < instanceCount; i++)
+	for (int i = 0; i < OBJECT_INSTANCES; i++)
 	{
 		pInstanceDesc->InstanceID = i;                            // exposed to the shader via InstanceID()
 		pInstanceDesc->InstanceContributionToHitGroupIndex = i;   // offset inside the shader-table. we only have a single geometry, so the offset 0
@@ -780,10 +800,6 @@ ID3D12RootSignature* createGlobalRootSignature()
 	return pRootSig;
 }
 
-const WCHAR* sRayGen = L"rayGen";
-const WCHAR* sClosestHit = L"closestHit";
-const WCHAR* sMiss = L"miss";
-const WCHAR* sHitGroup = L"HitGroup";
 int CreateRaytracingPipelineState()
 {
 	D3D12_STATE_SUBOBJECT soMem[100]{};
@@ -991,5 +1007,110 @@ int CreateShaderResources()
 	Base::Dx12Device->CreateShaderResourceView(nullptr, &srvDesc, Base::Resources::DXR::Dx12Accelleration_CPUHandle);
 
 	std::cout << "Shader descriptors setup done\n";
+	return 0;
+}
+
+
+int CreateShaderTables()
+{
+	ID3D12StateObjectProperties* pRtsoProps = nullptr;
+	if (SUCCEEDED(Base::States::DXRPipelineState->QueryInterface(IID_PPV_ARGS(&pRtsoProps))))
+	{
+		//raygen
+		{
+
+			struct alignas(D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT) RAY_GEN_SHADER_TABLE_DATA
+			{
+				unsigned char ShaderIdentifier[D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES];
+				UINT64 RTVDescriptor;
+			} tableData;
+
+			memcpy(tableData.ShaderIdentifier, pRtsoProps->GetShaderIdentifier(sRayGen), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+			tableData.RTVDescriptor = Base::Resources::DXR::Dx12RTDescriptorHeap->GetGPUDescriptorHandleForHeapStart().ptr;
+
+			//how big is the biggest?
+			union MaxSize
+			{
+				RAY_GEN_SHADER_TABLE_DATA data0;
+			};
+
+			Base::Resources::DXR::RayGenShaderTable.StrideInBytes = sizeof(MaxSize);
+			Base::Resources::DXR::RayGenShaderTable.SizeInBytes = Base::Resources::DXR::RayGenShaderTable.StrideInBytes * 1; //<-- only one for now...
+			Base::Resources::DXR::RayGenShaderTable.Resource = createBuffer(Base::Resources::DXR::RayGenShaderTable.SizeInBytes, D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_GENERIC_READ, uploadHeapProperties);
+
+			// Map the buffer
+			void* pData;
+			Base::Resources::DXR::RayGenShaderTable.Resource->Map(0, nullptr, &pData);
+			memcpy(pData, &tableData, sizeof(tableData));
+			Base::Resources::DXR::RayGenShaderTable.Resource->Unmap(0, nullptr);
+		}
+
+		//miss
+		{
+
+			struct alignas(D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT) MISS_SHADER_TABLE_DATA
+			{
+				unsigned char ShaderIdentifier[D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES];
+			} tableData;
+
+			memcpy(tableData.ShaderIdentifier, pRtsoProps->GetShaderIdentifier(sMiss), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+
+			//how big is the biggest?
+			union MaxSize
+			{
+				MISS_SHADER_TABLE_DATA data0;
+			};
+
+			Base::Resources::DXR::MissShaderTable.StrideInBytes = sizeof(MaxSize);
+			Base::Resources::DXR::MissShaderTable.SizeInBytes = Base::Resources::DXR::MissShaderTable.StrideInBytes * 1; //<-- only one for now...
+			Base::Resources::DXR::MissShaderTable.Resource = createBuffer(Base::Resources::DXR::MissShaderTable.SizeInBytes, D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_GENERIC_READ, uploadHeapProperties);
+
+			// Map the buffer
+			void* pData;
+			Base::Resources::DXR::MissShaderTable.Resource->Map(0, nullptr, &pData);
+			memcpy(pData, &tableData, sizeof(tableData));
+			Base::Resources::DXR::MissShaderTable.Resource->Unmap(0, nullptr);
+		}
+
+		//hit program
+		{
+
+			struct alignas(D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT) HIT_GROUP_SHADER_TABLE_DATA
+			{
+				unsigned char ShaderIdentifier[D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES];
+				float ShaderTableColor[3];
+			} tableData[OBJECT_INSTANCES]{};
+
+			for (int i = 0; i < OBJECT_INSTANCES; i++)
+			{
+				memcpy(tableData[i].ShaderIdentifier, pRtsoProps->GetShaderIdentifier(sHitGroup), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+
+				const float luminance = i / float(OBJECT_INSTANCES);
+				tableData[i].ShaderTableColor[0] = luminance;
+				tableData[i].ShaderTableColor[1] = luminance;
+				tableData[i].ShaderTableColor[2] = luminance;
+			}
+
+			//how big is the biggest?
+			union MaxSize
+			{
+				HIT_GROUP_SHADER_TABLE_DATA data0;
+			};
+
+			Base::Resources::DXR::HitGroupShaderTable.StrideInBytes = sizeof(MaxSize);
+			Base::Resources::DXR::HitGroupShaderTable.SizeInBytes = Base::Resources::DXR::HitGroupShaderTable.StrideInBytes * OBJECT_INSTANCES;
+			Base::Resources::DXR::HitGroupShaderTable.Resource = createBuffer(Base::Resources::DXR::HitGroupShaderTable.SizeInBytes, D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_GENERIC_READ, uploadHeapProperties);
+
+			// Map the buffer
+			void* pData;
+			Base::Resources::DXR::HitGroupShaderTable.Resource->Map(0, nullptr, &pData);
+			memcpy(pData, &tableData, sizeof(tableData));
+			Base::Resources::DXR::HitGroupShaderTable.Resource->Unmap(0, nullptr);
+		}
+
+		pRtsoProps->Release();
+	}
+
+	std::cout << "Shader tables setup done\n";
 	return 0;
 }
