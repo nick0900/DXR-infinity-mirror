@@ -83,11 +83,13 @@ namespace Base
 
 			uint64_t ConservativeTopSize;
 			AccelerationStructureBuffers TopBuffers;
-		}
 
-		namespace RootSignatures
-		{
-			ID3D12RootSignature* GlobalRS;
+			ID3D12RootSignature* Dx12GlobalRS;
+
+			ID3D12DescriptorHeap* Dx12RTDescriptorHeap;
+			ID3D12Resource1* Dx12OutputResource;
+			D3D12_CPU_DESCRIPTOR_HANDLE Dx12OutputUAV_CPUHandle;
+			D3D12_CPU_DESCRIPTOR_HANDLE Dx12Accelleration_CPUHandle;
 		}
 	}
 
@@ -127,6 +129,7 @@ int CreateFenceAndEventHandle();
 int CreateRenderTargets();
 int CreateAccelerationStructures();
 int CreateRaytracingPipelineState();
+int CreateShaderResources();
 
 int DX12Setup(HWND wndHandle)
 {
@@ -143,7 +146,8 @@ int DX12Setup(HWND wndHandle)
 	if (CreateAccelerationStructures() != 0) return 1;
 
 	if (CreateRaytracingPipelineState() != 0) return 1;
-	//		CreateShaderResources();
+
+	if (CreateShaderResources() != 0) return 1;
 
 			//last
 	//		CreateShaderTables();
@@ -922,11 +926,11 @@ int CreateRaytracingPipelineState()
 
 
 	//Init global root signature
-	Base::Resources::RootSignatures::GlobalRS = createGlobalRootSignature();
+	Base::Resources::DXR::Dx12GlobalRS = createGlobalRootSignature();
 
 	D3D12_STATE_SUBOBJECT* soGlobalRoot = nextSubobject();
 	soGlobalRoot->Type = D3D12_STATE_SUBOBJECT_TYPE_GLOBAL_ROOT_SIGNATURE;
-	soGlobalRoot->pDesc = &Base::Resources::RootSignatures::GlobalRS;
+	soGlobalRoot->pDesc = &Base::Resources::DXR::Dx12GlobalRS;
 
 
 	// Create the state
@@ -943,9 +947,49 @@ int CreateRaytracingPipelineState()
 	SafeRelease(&hitGroupLocalRoot);
 	SafeRelease(&missLocalRoot);
 
-	std::cout << "Ray tracing pipeline state setup\n";
+	std::cout << "Ray tracing pipeline state setup done\n";
 	return 0;
 }
 
 
+int CreateShaderResources()
+{
+	D3D12_DESCRIPTOR_HEAP_DESC heapDescriptorDesc = {};
+	heapDescriptorDesc.NumDescriptors = 10;
+	heapDescriptorDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+	heapDescriptorDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+	Base::Dx12Device->CreateDescriptorHeap(&heapDescriptorDesc, IID_PPV_ARGS(&Base::Resources::DXR::Dx12RTDescriptorHeap));
 
+	// Create the output resource. The dimensions and format should match the swap-chain
+	D3D12_RESOURCE_DESC resDesc = {};
+	resDesc.DepthOrArraySize = 1;
+	resDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+	resDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM; // The backbuffer is actually DXGI_FORMAT_R8G8B8A8_UNORM_SRGB, but sRGB formats can't be used with UAVs. We will convert to sRGB ourselves in the shader
+	resDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+	resDesc.Width = SCREEN_WIDTH;
+	resDesc.Height = SCREEN_HEIGHT;
+	resDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+	resDesc.MipLevels = 1;
+	resDesc.SampleDesc.Count = 1;
+	Base::Dx12Device->CreateCommittedResource(&defaultHeapProps, D3D12_HEAP_FLAG_NONE, &resDesc, D3D12_RESOURCE_STATE_COPY_SOURCE, nullptr, IID_PPV_ARGS(&Base::Resources::DXR::Dx12OutputResource)); // Starting as copy-source to simplify onFrameRender()
+
+	// Create the UAV. Based on the root signature we created it should be the first entry
+	D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
+	uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+
+	Base::Resources::DXR::Dx12OutputUAV_CPUHandle = Base::Resources::DXR::Dx12RTDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
+	Base::Dx12Device->CreateUnorderedAccessView(Base::Resources::DXR::Dx12OutputResource, nullptr, &uavDesc, Base::Resources::DXR::Dx12OutputUAV_CPUHandle);
+
+	// Create the TLAS SRV right after the UAV. Note that we are using a different SRV desc here
+	D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+	srvDesc.ViewDimension = D3D12_SRV_DIMENSION_RAYTRACING_ACCELERATION_STRUCTURE;
+	srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+	srvDesc.RaytracingAccelerationStructure.Location = Base::Resources::DXR::TopBuffers.pResult->GetGPUVirtualAddress();
+
+	Base::Resources::DXR::Dx12Accelleration_CPUHandle = Base::Resources::DXR::Dx12RTDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
+	Base::Resources::DXR::Dx12Accelleration_CPUHandle.ptr += Base::Dx12Device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+	Base::Dx12Device->CreateShaderResourceView(nullptr, &srvDesc, Base::Resources::DXR::Dx12Accelleration_CPUHandle);
+
+	std::cout << "Shader descriptors setup done\n";
+	return 0;
+}
