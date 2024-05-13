@@ -33,30 +33,29 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 				break;
 			}
 
-			//		WaitForGpu();
+			WaitForCompute();
+			WaitForDirect();
 
 			ShowWindow(wndHandle, nCmdShow);
 			while (WM_QUIT != msg.message)
 			{
-				//			if (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE))
-				//			{
-				//				TranslateMessage(&msg);
-				//				DispatchMessage(&msg);
-				//			}
-				//			else
-				//			{
-				//				UINT backBufferIndex = gSwapChain4->GetCurrentBackBufferIndex();
-
-				//				Update(backBufferIndex);
-				//				Render(backBufferIndex);
-				//			}
+				if (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE))
+				{
+					TranslateMessage(&msg);
+					DispatchMessage(&msg);
+				}
+				else
+				{
+					Update();
+					Render();
+				}
 			}
 		}
 	} while (false);
 
 	//Wait for GPU execution to be done and then release all interfaces.
-	//WaitForGpu();
-	//CloseHandle(gEventHandle);
+	WaitForCompute();
+	WaitForDirect();
 
 	DX12Free();
 
