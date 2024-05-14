@@ -14,11 +14,12 @@ const unsigned int NUM_SWAP_BUFFERS = 2; //Number of buffers
 
 //Shader Names
 #define RAY_GEN_SHADER_NAME L"rayGen";
-#define CLOSEST_HIT_SHADER_NAME L"closestHit";
 #define MISS_SHADER_NAME L"miss";
-#define HIT_GROUP_SHADER_NAME L"HitGroup";
+
+#define MIRROR_HIT_GROUP_SHADER_NAME L"HitGroup_Mirror";
+#define MIRROR_CLOSEST_HIT_SHADER_NAME L"closestHit_mirror";
+#define EDGES_HIT_GROUP_SHADER_NAME L"HitGroup_edges";
+#define EDGES_CLOSEST_HIT_SHADER_NAME L"closestHit_edges";
 //
 
-//Test Setup
-const uint32_t OBJECT_INSTANCES = 3;
-//
+#define MODEL_PARTS 2

@@ -14,9 +14,12 @@
 #include "ShaderCompiler.h"
 
 const WCHAR* sRayGen = RAY_GEN_SHADER_NAME;
-const WCHAR* sClosestHit = CLOSEST_HIT_SHADER_NAME;
 const WCHAR* sMiss = MISS_SHADER_NAME;
-const WCHAR* sHitGroup = HIT_GROUP_SHADER_NAME;
+
+const WCHAR* sHitGroupMirror = MIRROR_HIT_GROUP_SHADER_NAME;
+const WCHAR* sClosestHitMirror = MIRROR_CLOSEST_HIT_SHADER_NAME;
+const WCHAR* sHitGroupEdges = EDGES_HIT_GROUP_SHADER_NAME;
+const WCHAR* sClosestHitEdges = EDGES_CLOSEST_HIT_SHADER_NAME;
 
 template<class Interface>
 inline void SafeRelease(Interface** ppInterfaceToRelease)
@@ -96,7 +99,7 @@ namespace Base
 
 		namespace DXR
 		{
-			AccelerationStructureBuffers BottomBuffers{};
+			AccelerationStructureBuffers BottomBuffers[2] = { {}, {} };
 
 			uint64_t ConservativeTopSize;
 			AccelerationStructureBuffers TopBuffers{};
@@ -108,9 +111,12 @@ namespace Base
 			D3D12_CPU_DESCRIPTOR_HANDLE Dx12OutputUAV_CPUHandle;
 			D3D12_CPU_DESCRIPTOR_HANDLE Dx12Accelleration_CPUHandle;
 
-			ShaderTableData RayGenShaderTable{};
-			ShaderTableData MissShaderTable{};
-			ShaderTableData HitGroupShaderTable{};
+			namespace Shaders
+			{
+				ShaderTableData RayGenShaderTable{};
+				ShaderTableData MissShaderTable{};
+				ShaderTableData HitGroupShaderTable{};
+			}
 		}
 	}
 
@@ -522,7 +528,23 @@ ID3D12Resource1* createTriangleIB(MeshGeometry* mesh)
 	return pBuffer;
 }
 
-void createBottomLevelAS(ID3D12GraphicsCommandList4* pCmdList, D3D12_RAYTRACING_GEOMETRY_DESC* geomDesc, uint32_t numDescs)
+void SetupGeometryDesc(D3D12_RAYTRACING_GEOMETRY_DESC* geomDesc, ID3D12Resource1* vertexBuffer, uint32_t numVertecies, ID3D12Resource1* indexBuffer, uint32_t numIndecies)
+{
+	geomDesc->Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
+
+	geomDesc->Triangles.VertexBuffer.StartAddress = vertexBuffer->GetGPUVirtualAddress();
+	geomDesc->Triangles.VertexBuffer.StrideInBytes = sizeof(Vertex);
+	geomDesc->Triangles.VertexFormat = DXGI_FORMAT_R32G32B32_FLOAT;
+	geomDesc->Triangles.VertexCount = numVertecies;
+
+	geomDesc->Triangles.IndexBuffer = indexBuffer->GetGPUVirtualAddress();
+	geomDesc->Triangles.IndexFormat = DXGI_FORMAT_R32_UINT;
+	geomDesc->Triangles.IndexCount = numIndecies;
+
+	geomDesc->Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
+}
+
+void createBottomLevelAS(ID3D12GraphicsCommandList4* pCmdList, D3D12_RAYTRACING_GEOMETRY_DESC* geomDesc, uint32_t numDescs, AccelerationStructureBuffers* ASBuffers)
 {
 	// Get the size requirements for the scratch and AS buffers
 	D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS inputs = {};
@@ -537,31 +559,31 @@ void createBottomLevelAS(ID3D12GraphicsCommandList4* pCmdList, D3D12_RAYTRACING_
 
 	// Create the buffers. They need to support UAV, and since we are going to immediately use them, we create them with an unordered-access state
 
-	Base::Resources::DXR::BottomBuffers.pScratch = createBuffer(info.ScratchDataSizeInBytes, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, defaultHeapProps);
-	Base::Resources::DXR::BottomBuffers.pResult = createBuffer(info.ResultDataMaxSizeInBytes, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE, defaultHeapProps);
+	ASBuffers->pScratch = createBuffer(info.ScratchDataSizeInBytes, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, defaultHeapProps);
+	ASBuffers->pResult = createBuffer(info.ResultDataMaxSizeInBytes, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE, defaultHeapProps);
 
 	// Create the bottom-level AS
 	D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC asDesc = {};
 	asDesc.Inputs = inputs;
-	asDesc.DestAccelerationStructureData = Base::Resources::DXR::BottomBuffers.pResult->GetGPUVirtualAddress();
-	asDesc.ScratchAccelerationStructureData = Base::Resources::DXR::BottomBuffers.pScratch->GetGPUVirtualAddress();
+	asDesc.DestAccelerationStructureData = ASBuffers->pResult->GetGPUVirtualAddress();
+	asDesc.ScratchAccelerationStructureData = ASBuffers->pScratch->GetGPUVirtualAddress();
 
 	pCmdList->BuildRaytracingAccelerationStructure(&asDesc, 0, nullptr);
 
 	// We need to insert a UAV barrier before using the acceleration structures in a raytracing operation
 	D3D12_RESOURCE_BARRIER uavBarrier = {};
 	uavBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
-	uavBarrier.UAV.pResource = Base::Resources::DXR::BottomBuffers.pResult;
+	uavBarrier.UAV.pResource = ASBuffers->pResult;
 	pCmdList->ResourceBarrier(1, &uavBarrier);
 }
 
-void createTopLevelAS(ID3D12GraphicsCommandList4* pCmdList, ID3D12Resource1* pBottomLevelAS)
+void createTopLevelAS(ID3D12GraphicsCommandList4* pCmdList)
 {
 	// First, get the size of the TLAS buffers and create them
 	D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS inputs = {};
 	inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
 	inputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_NONE;
-	inputs.NumDescs = OBJECT_INSTANCES;
+	inputs.NumDescs = MODEL_PARTS;
 	inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL;
 
 	// on first call, create the buffer
@@ -583,7 +605,7 @@ void createTopLevelAS(ID3D12GraphicsCommandList4* pCmdList, ID3D12Resource1* pBo
 		Base::Resources::DXR::ConservativeTopSize = info.ResultDataMaxSizeInBytes;
 
 		Base::Resources::DXR::TopBuffers.pInstanceDesc = createBuffer(
-			sizeof(D3D12_RAYTRACING_INSTANCE_DESC) * OBJECT_INSTANCES,
+			sizeof(D3D12_RAYTRACING_INSTANCE_DESC) * MODEL_PARTS,
 			D3D12_RESOURCE_FLAG_NONE,
 			D3D12_RESOURCE_STATE_GENERIC_READ,
 			uploadHeapProperties);
@@ -594,7 +616,7 @@ void createTopLevelAS(ID3D12GraphicsCommandList4* pCmdList, ID3D12Resource1* pBo
 
 	static float rotY = 0;
 	rotY += 0.001f;
-	for (int i = 0; i < OBJECT_INSTANCES; i++)
+	for (int i = 0; i < MODEL_PARTS; i++)
 	{
 		pInstanceDesc->InstanceID = i;                            // exposed to the shader via InstanceID()
 		pInstanceDesc->InstanceContributionToHitGroupIndex = i;   // offset inside the shader-table. we only have a single geometry, so the offset 0
@@ -603,10 +625,10 @@ void createTopLevelAS(ID3D12GraphicsCommandList4* pCmdList, ID3D12Resource1* pBo
 		
 		//apply transform
 		DirectX::XMFLOAT3X4 m;
-		DirectX::XMStoreFloat3x4(&m, DirectX::XMMatrixRotationY(i * 0.25f + rotY) * DirectX::XMMatrixTranslation(-2.0f + i * 2, 0, 0));
+		DirectX::XMStoreFloat3x4(&m, DirectX::XMMatrixScaling(0.5f, 0.5f, 0.5f) * DirectX::XMMatrixRotationY(0.25f + rotY) * DirectX::XMMatrixTranslation(0, 0, 0));
 		memcpy(pInstanceDesc->Transform, &m, sizeof(pInstanceDesc->Transform));
 
-		pInstanceDesc->AccelerationStructure = pBottomLevelAS->GetGPUVirtualAddress();
+		pInstanceDesc->AccelerationStructure = Base::Resources::DXR::BottomBuffers[i].pResult->GetGPUVirtualAddress();
 		pInstanceDesc->InstanceMask = 0xFF;
 
 		pInstanceDesc++;
@@ -648,34 +670,13 @@ int CreateAccelerationStructures()
 	ID3D12Resource1* mpIndexBuffer2 = createTriangleIB(&infiniMirror.meshGeometries[1]);
 
 	D3D12_RAYTRACING_GEOMETRY_DESC geomDesc[2] = {};
-	geomDesc[0].Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
 
-	geomDesc[0].Triangles.VertexBuffer.StartAddress = mpVertexBuffer1->GetGPUVirtualAddress();
-	geomDesc[0].Triangles.VertexBuffer.StrideInBytes = sizeof(Vertex);
-	geomDesc[0].Triangles.VertexFormat = DXGI_FORMAT_R32G32B32_FLOAT;
-	geomDesc[0].Triangles.VertexCount = infiniMirror.meshGeometries[0].numVertecies;
+	SetupGeometryDesc(&geomDesc[0], mpVertexBuffer1, infiniMirror.meshGeometries[0].numVertecies, mpIndexBuffer1, infiniMirror.meshGeometries[0].numIndecies);
+	SetupGeometryDesc(&geomDesc[1], mpVertexBuffer2, infiniMirror.meshGeometries[1].numVertecies, mpIndexBuffer2, infiniMirror.meshGeometries[1].numIndecies);
 
-	geomDesc[0].Triangles.IndexBuffer = mpIndexBuffer1->GetGPUVirtualAddress();
-	geomDesc[0].Triangles.IndexFormat = DXGI_FORMAT_R32_UINT;
-	geomDesc[0].Triangles.IndexCount = infiniMirror.meshGeometries[0].numIndecies;
-
-	geomDesc[0].Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
-
-	geomDesc[1].Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
-
-	geomDesc[1].Triangles.VertexBuffer.StartAddress = mpVertexBuffer2->GetGPUVirtualAddress();
-	geomDesc[1].Triangles.VertexBuffer.StrideInBytes = sizeof(Vertex);
-	geomDesc[1].Triangles.VertexFormat = DXGI_FORMAT_R32G32B32_FLOAT;
-	geomDesc[1].Triangles.VertexCount = infiniMirror.meshGeometries[1].numVertecies;
-
-	geomDesc[1].Triangles.IndexBuffer = mpIndexBuffer2->GetGPUVirtualAddress();
-	geomDesc[1].Triangles.IndexFormat = DXGI_FORMAT_R32_UINT;
-	geomDesc[1].Triangles.IndexCount = infiniMirror.meshGeometries[1].numIndecies;
-
-	geomDesc[1].Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
-
-	createBottomLevelAS(Base::Queues::Compute::Dx12CommandList4, geomDesc, ARRAYSIZE(geomDesc));
-	createTopLevelAS(Base::Queues::Compute::Dx12CommandList4, Base::Resources::DXR::BottomBuffers.pResult);
+	createBottomLevelAS(Base::Queues::Compute::Dx12CommandList4, geomDesc, 1, &Base::Resources::DXR::BottomBuffers[0]);
+	createBottomLevelAS(Base::Queues::Compute::Dx12CommandList4, geomDesc + 1, 1, &Base::Resources::DXR::BottomBuffers[1]);
+	createTopLevelAS(Base::Queues::Compute::Dx12CommandList4);
 
 	Base::Queues::Compute::Dx12CommandList4->Close();
 	ID3D12CommandList* listsToExec[] = { Base::Queues::Compute::Dx12CommandList4 };
@@ -848,8 +849,9 @@ int CreateRaytracingPipelineState()
 	//Init DXIL subobject
 	D3D12_EXPORT_DESC dxilExports[] = {
 		sRayGen, nullptr, D3D12_EXPORT_FLAG_NONE,
-		sClosestHit, nullptr, D3D12_EXPORT_FLAG_NONE,
 		sMiss, nullptr, D3D12_EXPORT_FLAG_NONE,
+		sClosestHitMirror, nullptr, D3D12_EXPORT_FLAG_NONE,
+		sClosestHitEdges, nullptr, D3D12_EXPORT_FLAG_NONE,
 	};
 	D3D12_DXIL_LIBRARY_DESC dxilLibraryDesc;
 	dxilLibraryDesc.DXILLibrary.pShaderBytecode = pShaders->GetBufferPointer();
@@ -862,17 +864,29 @@ int CreateRaytracingPipelineState()
 	soDXIL->pDesc = &dxilLibraryDesc;
 
 
-	//Init hit group
-	D3D12_HIT_GROUP_DESC hitGroupDesc;
-	hitGroupDesc.AnyHitShaderImport = nullptr;
-	hitGroupDesc.ClosestHitShaderImport = sClosestHit;
-	hitGroupDesc.HitGroupExport = sHitGroup;
-	hitGroupDesc.IntersectionShaderImport = nullptr;
-	hitGroupDesc.Type = D3D12_HIT_GROUP_TYPE_TRIANGLES;
+	//Init hit group Mirror
+	D3D12_HIT_GROUP_DESC hitGroupDescMirror;
+	hitGroupDescMirror.AnyHitShaderImport = nullptr;
+	hitGroupDescMirror.ClosestHitShaderImport = sClosestHitMirror;
+	hitGroupDescMirror.HitGroupExport = sHitGroupMirror;
+	hitGroupDescMirror.IntersectionShaderImport = nullptr;
+	hitGroupDescMirror.Type = D3D12_HIT_GROUP_TYPE_TRIANGLES;
 
-	D3D12_STATE_SUBOBJECT* soHitGroup = nextSubobject();
-	soHitGroup->Type = D3D12_STATE_SUBOBJECT_TYPE_HIT_GROUP;
-	soHitGroup->pDesc = &hitGroupDesc;
+	D3D12_STATE_SUBOBJECT* soHitGroupMirror = nextSubobject();
+	soHitGroupMirror->Type = D3D12_STATE_SUBOBJECT_TYPE_HIT_GROUP;
+	soHitGroupMirror->pDesc = &hitGroupDescMirror;
+
+	//Init hit group Edges
+	D3D12_HIT_GROUP_DESC hitGroupDescEdges;
+	hitGroupDescEdges.AnyHitShaderImport = nullptr;
+	hitGroupDescEdges.ClosestHitShaderImport = sClosestHitEdges;
+	hitGroupDescEdges.HitGroupExport = sHitGroupEdges;
+	hitGroupDescEdges.IntersectionShaderImport = nullptr;
+	hitGroupDescEdges.Type = D3D12_HIT_GROUP_TYPE_TRIANGLES;
+
+	D3D12_STATE_SUBOBJECT* soHitGroupEdges = nextSubobject();
+	soHitGroupEdges->Type = D3D12_STATE_SUBOBJECT_TYPE_HIT_GROUP;
+	soHitGroupEdges->pDesc = &hitGroupDescEdges;
 
 	//Init rayGen local root signature
 	ID3D12RootSignature* rayGenLocalRoot = createRayGenLocalRootSignature();
@@ -901,7 +915,7 @@ int CreateRaytracingPipelineState()
 
 	//Bind local root signature to hit group shaders
 	D3D12_SUBOBJECT_TO_EXPORTS_ASSOCIATION hitGroupLocalRootAssociation;
-	LPCWSTR hitGroupLocalRootAssociationShaderNames[] = { sClosestHit };
+	LPCWSTR hitGroupLocalRootAssociationShaderNames[] = { sClosestHitMirror, sClosestHitEdges };
 	hitGroupLocalRootAssociation.pExports = hitGroupLocalRootAssociationShaderNames;
 	hitGroupLocalRootAssociation.NumExports = _countof(hitGroupLocalRootAssociationShaderNames);
 	hitGroupLocalRootAssociation.pSubobjectToAssociate = soHitGroupLocalRoot; //<-- address to local root subobject
@@ -941,7 +955,7 @@ int CreateRaytracingPipelineState()
 
 	//Bind the payload size to the programs
 	D3D12_SUBOBJECT_TO_EXPORTS_ASSOCIATION shaderConfigAssociation;
-	const WCHAR* shaderNamesToConfig[] = { sMiss, sClosestHit, sRayGen };
+	const WCHAR* shaderNamesToConfig[] = { sMiss, sClosestHitMirror, sClosestHitEdges, sRayGen };
 	shaderConfigAssociation.pExports = shaderNamesToConfig;
 	shaderConfigAssociation.NumExports = _countof(shaderNamesToConfig);
 	shaderConfigAssociation.pSubobjectToAssociate = soShaderConfig; //<-- address to shader config subobject
@@ -1054,15 +1068,15 @@ int CreateShaderTables()
 				RAY_GEN_SHADER_TABLE_DATA data0;
 			};
 
-			Base::Resources::DXR::RayGenShaderTable.StrideInBytes = sizeof(MaxSize);
-			Base::Resources::DXR::RayGenShaderTable.SizeInBytes = Base::Resources::DXR::RayGenShaderTable.StrideInBytes * 1; //<-- only one for now...
-			Base::Resources::DXR::RayGenShaderTable.Resource = createBuffer(Base::Resources::DXR::RayGenShaderTable.SizeInBytes, D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_GENERIC_READ, uploadHeapProperties);
+			Base::Resources::DXR::Shaders::RayGenShaderTable.StrideInBytes = sizeof(MaxSize);
+			Base::Resources::DXR::Shaders::RayGenShaderTable.SizeInBytes = Base::Resources::DXR::Shaders::RayGenShaderTable.StrideInBytes * 1; //<-- only one for now...
+			Base::Resources::DXR::Shaders::RayGenShaderTable.Resource = createBuffer(Base::Resources::DXR::Shaders::RayGenShaderTable.SizeInBytes, D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_GENERIC_READ, uploadHeapProperties);
 
 			// Map the buffer
 			void* pData;
-			Base::Resources::DXR::RayGenShaderTable.Resource->Map(0, nullptr, &pData);
+			Base::Resources::DXR::Shaders::RayGenShaderTable.Resource->Map(0, nullptr, &pData);
 			memcpy(pData, &tableData, sizeof(tableData));
-			Base::Resources::DXR::RayGenShaderTable.Resource->Unmap(0, nullptr);
+			Base::Resources::DXR::Shaders::RayGenShaderTable.Resource->Unmap(0, nullptr);
 		}
 
 		//miss
@@ -1081,15 +1095,15 @@ int CreateShaderTables()
 				MISS_SHADER_TABLE_DATA data0;
 			};
 
-			Base::Resources::DXR::MissShaderTable.StrideInBytes = sizeof(MaxSize);
-			Base::Resources::DXR::MissShaderTable.SizeInBytes = Base::Resources::DXR::MissShaderTable.StrideInBytes * 1; //<-- only one for now...
-			Base::Resources::DXR::MissShaderTable.Resource = createBuffer(Base::Resources::DXR::MissShaderTable.SizeInBytes, D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_GENERIC_READ, uploadHeapProperties);
+			Base::Resources::DXR::Shaders::MissShaderTable.StrideInBytes = sizeof(MaxSize);
+			Base::Resources::DXR::Shaders::MissShaderTable.SizeInBytes = Base::Resources::DXR::Shaders::MissShaderTable.StrideInBytes * 1; //<-- only one for now...
+			Base::Resources::DXR::Shaders::MissShaderTable.Resource = createBuffer(Base::Resources::DXR::Shaders::MissShaderTable.SizeInBytes, D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_GENERIC_READ, uploadHeapProperties);
 
 			// Map the buffer
 			void* pData;
-			Base::Resources::DXR::MissShaderTable.Resource->Map(0, nullptr, &pData);
+			Base::Resources::DXR::Shaders::MissShaderTable.Resource->Map(0, nullptr, &pData);
 			memcpy(pData, &tableData, sizeof(tableData));
-			Base::Resources::DXR::MissShaderTable.Resource->Unmap(0, nullptr);
+			Base::Resources::DXR::Shaders::MissShaderTable.Resource->Unmap(0, nullptr);
 		}
 
 		//hit program
@@ -1099,17 +1113,19 @@ int CreateShaderTables()
 			{
 				unsigned char ShaderIdentifier[D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES];
 				float ShaderTableColor[3];
-			} tableData[OBJECT_INSTANCES]{};
+			} tableData[MODEL_PARTS]{};
 
-			for (int i = 0; i < OBJECT_INSTANCES; i++)
-			{
-				memcpy(tableData[i].ShaderIdentifier, pRtsoProps->GetShaderIdentifier(sHitGroup), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+			const float luminance = 2.0f / 3.0f;
 
-				const float luminance = i / float(OBJECT_INSTANCES);
-				tableData[i].ShaderTableColor[0] = luminance;
-				tableData[i].ShaderTableColor[1] = luminance;
-				tableData[i].ShaderTableColor[2] = luminance;
-			}
+			memcpy(tableData[0].ShaderIdentifier, pRtsoProps->GetShaderIdentifier(sHitGroupMirror), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+			tableData[0].ShaderTableColor[0] = luminance;
+			tableData[0].ShaderTableColor[1] = luminance;
+			tableData[0].ShaderTableColor[2] = luminance;
+
+			memcpy(tableData[1].ShaderIdentifier, pRtsoProps->GetShaderIdentifier(sHitGroupEdges), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+			tableData[1].ShaderTableColor[0] = luminance;
+			tableData[1].ShaderTableColor[1] = luminance;
+			tableData[1].ShaderTableColor[2] = luminance;
 
 			//how big is the biggest?
 			union MaxSize
@@ -1117,15 +1133,15 @@ int CreateShaderTables()
 				HIT_GROUP_SHADER_TABLE_DATA data0;
 			};
 
-			Base::Resources::DXR::HitGroupShaderTable.StrideInBytes = sizeof(MaxSize);
-			Base::Resources::DXR::HitGroupShaderTable.SizeInBytes = Base::Resources::DXR::HitGroupShaderTable.StrideInBytes * OBJECT_INSTANCES;
-			Base::Resources::DXR::HitGroupShaderTable.Resource = createBuffer(Base::Resources::DXR::HitGroupShaderTable.SizeInBytes, D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_GENERIC_READ, uploadHeapProperties);
+			Base::Resources::DXR::Shaders::HitGroupShaderTable.StrideInBytes = sizeof(MaxSize);
+			Base::Resources::DXR::Shaders::HitGroupShaderTable.SizeInBytes = Base::Resources::DXR::Shaders::HitGroupShaderTable.StrideInBytes * MODEL_PARTS;
+			Base::Resources::DXR::Shaders::HitGroupShaderTable.Resource = createBuffer(Base::Resources::DXR::Shaders::HitGroupShaderTable.SizeInBytes, D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_GENERIC_READ, uploadHeapProperties);
 
 			// Map the buffer
 			void* pData;
-			Base::Resources::DXR::HitGroupShaderTable.Resource->Map(0, nullptr, &pData);
+			Base::Resources::DXR::Shaders::HitGroupShaderTable.Resource->Map(0, nullptr, &pData);
 			memcpy(pData, &tableData, sizeof(tableData));
-			Base::Resources::DXR::HitGroupShaderTable.Resource->Unmap(0, nullptr);
+			Base::Resources::DXR::Shaders::HitGroupShaderTable.Resource->Unmap(0, nullptr);
 		}
 
 		pRtsoProps->Release();
@@ -1169,7 +1185,7 @@ void Render()
 	Base::Queues::Compute::Dx12CommandList4->SetDescriptorHeaps(ARRAYSIZE(descriptorHeaps), descriptorHeaps);
 
 	//hack to update every frame...
-	createTopLevelAS(Base::Queues::Compute::Dx12CommandList4, Base::Resources::DXR::BottomBuffers.pResult);
+	createTopLevelAS(Base::Queues::Compute::Dx12CommandList4);
 
 	// Let's raytrace
 	SetResourceTransitionBarrier(Base::Queues::Compute::Dx12CommandList4, Base::Resources::DXR::Dx12OutputResource, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
@@ -1179,16 +1195,16 @@ void Render()
 	raytraceDesc.Depth = 1;
 
 	//set shader tables
-	raytraceDesc.RayGenerationShaderRecord.StartAddress = Base::Resources::DXR::RayGenShaderTable.Resource->GetGPUVirtualAddress();
-	raytraceDesc.RayGenerationShaderRecord.SizeInBytes = Base::Resources::DXR::RayGenShaderTable.SizeInBytes;
+	raytraceDesc.RayGenerationShaderRecord.StartAddress = Base::Resources::DXR::Shaders::RayGenShaderTable.Resource->GetGPUVirtualAddress();
+	raytraceDesc.RayGenerationShaderRecord.SizeInBytes = Base::Resources::DXR::Shaders::RayGenShaderTable.SizeInBytes;
 
-	raytraceDesc.MissShaderTable.StartAddress = Base::Resources::DXR::MissShaderTable.Resource->GetGPUVirtualAddress();
-	raytraceDesc.MissShaderTable.StrideInBytes = Base::Resources::DXR::MissShaderTable.StrideInBytes;
-	raytraceDesc.MissShaderTable.SizeInBytes = Base::Resources::DXR::MissShaderTable.SizeInBytes;
+	raytraceDesc.MissShaderTable.StartAddress = Base::Resources::DXR::Shaders::MissShaderTable.Resource->GetGPUVirtualAddress();
+	raytraceDesc.MissShaderTable.StrideInBytes = Base::Resources::DXR::Shaders::MissShaderTable.StrideInBytes;
+	raytraceDesc.MissShaderTable.SizeInBytes = Base::Resources::DXR::Shaders::MissShaderTable.SizeInBytes;
 
-	raytraceDesc.HitGroupTable.StartAddress = Base::Resources::DXR::HitGroupShaderTable.Resource->GetGPUVirtualAddress();
-	raytraceDesc.HitGroupTable.StrideInBytes = Base::Resources::DXR::HitGroupShaderTable.StrideInBytes;
-	raytraceDesc.HitGroupTable.SizeInBytes = Base::Resources::DXR::HitGroupShaderTable.SizeInBytes;
+	raytraceDesc.HitGroupTable.StartAddress = Base::Resources::DXR::Shaders::HitGroupShaderTable.Resource->GetGPUVirtualAddress();
+	raytraceDesc.HitGroupTable.StrideInBytes = Base::Resources::DXR::Shaders::HitGroupShaderTable.StrideInBytes;
+	raytraceDesc.HitGroupTable.SizeInBytes = Base::Resources::DXR::Shaders::HitGroupShaderTable.SizeInBytes;
 
 	// Bind the empty root signature
 	Base::Queues::Compute::Dx12CommandList4->SetComputeRootSignature(Base::Resources::DXR::Dx12GlobalRS);

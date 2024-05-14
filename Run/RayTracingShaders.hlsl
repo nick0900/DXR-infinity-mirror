@@ -47,7 +47,7 @@ void miss(inout RayPayload payload)
 }
 
 [shader("closesthit")]
-void closestHit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attribs)
+void closestHit_mirror(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attribs)
 {
 	//for info
 	float3 barycentrics = float3(1.0 - attribs.barycentrics.x - attribs.barycentrics.y, attribs.barycentrics.x, attribs.barycentrics.y);
@@ -55,4 +55,15 @@ void closestHit(inout RayPayload payload, in BuiltInTriangleIntersectionAttribut
 	uint primitiveID = PrimitiveIndex();
 
 	payload.color = float3(RedChannel, 0, 0) + ShaderTableColor;
+}
+
+[shader("closesthit")]
+void closestHit_edges(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attribs)
+{
+	//for info
+    float3 barycentrics = float3(1.0 - attribs.barycentrics.x - attribs.barycentrics.y, attribs.barycentrics.x, attribs.barycentrics.y);
+    uint instanceID = InstanceID();
+    uint primitiveID = PrimitiveIndex();
+
+    payload.color = float3(0, 0, RedChannel) + ShaderTableColor;
 }
