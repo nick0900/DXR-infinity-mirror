@@ -77,17 +77,17 @@ void closestHit_mirror(inout RayPayload payload, in BuiltInTriangleIntersectionA
 	uint instanceID = InstanceID();
 	uint primitiveID = PrimitiveIndex();
 	
-    //float3 vtx0 = Vertecies[Indecies[primitiveID * 3 + 0]].pos;
-    //Vertex vtx1 = Vertecies[Indecies[primitiveID * 3 + 1]];
-    //Vertex vtx2 = Vertecies[Indecies[primitiveID * 3 + 2]];
+    Vertex vtx0 = Vertecies[Indecies[primitiveID * 3 + 0]];
+    Vertex vtx1 = Vertecies[Indecies[primitiveID * 3 + 1]];
+    Vertex vtx2 = Vertecies[Indecies[primitiveID * 3 + 2]];
 	
-    //float3 interPos = vtx0.pos * barycentrics.x + vtx1.pos * barycentrics.y + vtx2.pos * barycentrics.z;
-    //float3 interNorm = normalize(vtx0.norm * barycentrics.x + vtx1.norm * barycentrics.y + vtx2.norm * barycentrics.z);
+    float3 interPos = vtx0.pos * barycentrics.x + vtx1.pos * barycentrics.y + vtx2.pos * barycentrics.z;
+    float3 interNorm = normalize(vtx0.norm * barycentrics.x + vtx1.norm * barycentrics.y + vtx2.norm * barycentrics.z);
 	
-    //float absorption = 1.0f / float(MaxRecursion);
-    //payload.color -= float3(absorption, absorption, absorption);
+    float absorption = 1.0f / float(MaxRecursion);
+    payload.color -= float3(absorption, absorption, absorption);
     
-    payload.color = TestTableColor;
+    payload.color = float3(float(Indecies[primitiveID]) / 80, 0.0f, 0.0f);
 }
 
 [shader("closesthit")]

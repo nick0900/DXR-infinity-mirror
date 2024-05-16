@@ -797,29 +797,20 @@ ID3D12RootSignature* createRayGenLocalRootSignature()
 
 ID3D12RootSignature* createMirrorHitGroupLocalRootSignature()
 {
-	D3D12_DESCRIPTOR_RANGE range[2]{};
-	D3D12_ROOT_PARAMETER rootParams[2]{};
+	D3D12_ROOT_PARAMETER rootParams[3]{};
 
-	range[0].BaseShaderRegister = 1;
-	range[0].NumDescriptors = 1;
-	range[0].RegisterSpace = 0;
-	range[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-	range[0].OffsetInDescriptorsFromTableStart = 0;
+	rootParams[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
+	rootParams[0].Descriptor.RegisterSpace = 0;
+	rootParams[0].Descriptor.ShaderRegister = 1;
 
-	range[1].BaseShaderRegister = 2;
-	range[1].NumDescriptors = 1;
-	range[1].RegisterSpace = 0;
-	range[1].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-	range[1].OffsetInDescriptorsFromTableStart = 1;
+	rootParams[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
+	rootParams[1].Descriptor.RegisterSpace = 0;
+	rootParams[1].Descriptor.ShaderRegister = 2;
 
-	rootParams[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-	rootParams[0].DescriptorTable.NumDescriptorRanges = _countof(range);
-	rootParams[0].DescriptorTable.pDescriptorRanges = range;
-
-	rootParams[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-	rootParams[1].Constants.RegisterSpace = 1;
-	rootParams[1].Constants.ShaderRegister = 0;
-	rootParams[1].Constants.Num32BitValues = 3;
+	rootParams[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+	rootParams[2].Constants.RegisterSpace = 1;
+	rootParams[2].Constants.ShaderRegister = 0;
+	rootParams[2].Constants.Num32BitValues = 3;
 
 	D3D12_ROOT_SIGNATURE_DESC desc = {};
 	desc.NumParameters = _countof(rootParams);
@@ -1236,7 +1227,8 @@ int CreateShaderTables()
 			struct alignas(D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT) HIT_GROUP_MIRROR_SHADER_TABLE_DATA
 			{
 				unsigned char ShaderIdentifier[D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES];
-				UINT64 SRVDescriptor;
+				UINT64 vertDescriptor;
+				UINT64 indDescriptor;
 				float ShaderTableColor[3];
 			} mirrorTableData{};
 
@@ -1247,7 +1239,8 @@ int CreateShaderTables()
 			} edgesTableData{};
 
 			memcpy(mirrorTableData.ShaderIdentifier, pRtsoProps->GetShaderIdentifier(sHitGroupMirror), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
-			mirrorTableData.SRVDescriptor = Base::Resources::Geometry::Dx12SRVDescriptorHeap->GetGPUDescriptorHandleForHeapStart().ptr;
+			mirrorTableData.vertDescriptor = Base::Resources::Geometry::Dx12VBResources[0]->GetGPUVirtualAddress();
+			mirrorTableData.indDescriptor = Base::Resources::Geometry::Dx12IBResources[0]->GetGPUVirtualAddress();
 			mirrorTableData.ShaderTableColor[0] = 1.0f;
 			mirrorTableData.ShaderTableColor[1] = 1.0f;
 			mirrorTableData.ShaderTableColor[2] = 0.0f;
