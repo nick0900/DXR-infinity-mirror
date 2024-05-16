@@ -4,9 +4,32 @@ RWTexture2D<float4> gOutput : register(u0);
 cbuffer CB_Global : register(b0, space0)
 {
 	float RedChannel;
+    uint MaxRecursion;
 }
 
-cbuffer CB_ShaderTableLocal : register(b0, space1)
+//Mirror Resources
+struct Vertex
+{
+    float3 pos;
+    float3 norm;
+    float2 uv;
+};
+
+struct Index
+{
+    uint i;
+};
+
+StructuredBuffer<Vertex> Vertecies : register(t1);
+StructuredBuffer<uint> Indecies : register(t2);
+
+cbuffer CB_MirrorShaderTableLocal : register(b0, space1)
+{
+    float3 TestTableColor;
+}
+
+//Edges Resources
+cbuffer CB_EdgesShaderTableLocal : register(b0, space2)
 {
 	float3 ShaderTableColor;
 }
@@ -35,8 +58,8 @@ void rayGen()
 	ray.TMin = 0;
 	ray.TMax = 100000;
 
-	RayPayload payload;
-	TraceRay(gRtScene, 0 /*rayFlags*/, 0xFF, 0 /* ray index*/, 0, 0, ray, payload);
+    RayPayload payload = { float3(1.0f, 1.0f, 1.0f) };
+    TraceRay(gRtScene, RAY_FLAG_CULL_BACK_FACING_TRIANGLES /*rayFlags*/, 0xFF, 0 /* ray index*/, 0, 0, ray, payload);
 	gOutput[launchIndex.xy] = float4(payload.color, 1);
 }
 
@@ -53,8 +76,18 @@ void closestHit_mirror(inout RayPayload payload, in BuiltInTriangleIntersectionA
 	float3 barycentrics = float3(1.0 - attribs.barycentrics.x - attribs.barycentrics.y, attribs.barycentrics.x, attribs.barycentrics.y);
 	uint instanceID = InstanceID();
 	uint primitiveID = PrimitiveIndex();
-
-	payload.color = float3(RedChannel, 0, 0) + ShaderTableColor;
+	
+    //float3 vtx0 = Vertecies[Indecies[primitiveID * 3 + 0]].pos;
+    //Vertex vtx1 = Vertecies[Indecies[primitiveID * 3 + 1]];
+    //Vertex vtx2 = Vertecies[Indecies[primitiveID * 3 + 2]];
+	
+    //float3 interPos = vtx0.pos * barycentrics.x + vtx1.pos * barycentrics.y + vtx2.pos * barycentrics.z;
+    //float3 interNorm = normalize(vtx0.norm * barycentrics.x + vtx1.norm * barycentrics.y + vtx2.norm * barycentrics.z);
+	
+    //float absorption = 1.0f / float(MaxRecursion);
+    //payload.color -= float3(absorption, absorption, absorption);
+    
+    payload.color = TestTableColor;
 }
 
 [shader("closesthit")]
@@ -65,5 +98,5 @@ void closestHit_edges(inout RayPayload payload, in BuiltInTriangleIntersectionAt
     uint instanceID = InstanceID();
     uint primitiveID = PrimitiveIndex();
 
-    payload.color = float3(0, 0, RedChannel) + ShaderTableColor;
+    payload.color *= float3(0, 0, RedChannel) + ShaderTableColor;
 }

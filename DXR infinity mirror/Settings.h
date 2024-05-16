@@ -12,6 +12,8 @@ const unsigned int SCREEN_HEIGHT = 480;	//Height of application.
 const D3D_FEATURE_LEVEL MINIMUM_FEATURE_LEVEL = D3D_FEATURE_LEVEL_12_1;
 const unsigned int NUM_SWAP_BUFFERS = 2; //Number of buffers
 
+const unsigned int MAX_RAY_BOUNCES = 1;
+
 //Shader Names
 #define RAY_GEN_SHADER_NAME L"rayGen";
 #define MISS_SHADER_NAME L"miss";
