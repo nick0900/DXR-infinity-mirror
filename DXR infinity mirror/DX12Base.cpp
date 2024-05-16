@@ -99,7 +99,7 @@ namespace Base
 
 		namespace DXR
 		{
-			AccelerationStructureBuffers BottomBuffers[2] = { {}, {} };
+			AccelerationStructureBuffers BottomBuffers[MODEL_PARTS] = { {}, {} };
 
 			uint64_t ConservativeTopSize;
 			AccelerationStructureBuffers TopBuffers{};
@@ -117,6 +117,16 @@ namespace Base
 				ShaderTableData MissShaderTable{};
 				ShaderTableData HitGroupShaderTable{};
 			}
+		}
+
+		namespace Geometry
+		{
+			uint32_t numVertecies[MODEL_PARTS];
+			uint32_t numIndecies[MODEL_PARTS];
+			ID3D12Resource1* Dx12VBResources[MODEL_PARTS];
+			ID3D12Resource1* Dx12IBResources[MODEL_PARTS];
+			ID3D12DescriptorHeap* Dx12SRVDescriptorHeap;
+			UINT Dx12SRVDescriptorStride;
 		}
 	}
 
@@ -214,6 +224,13 @@ void DX12Free()
 	for (int i = 0; i < NUM_SWAP_BUFFERS; i++)
 	{
 		SafeRelease(&Base::Resources::Backbuffers::Dx12RTVResources[i]);
+	}
+
+	SafeRelease(Base::Resources::Geometry::Dx12SRVDescriptorHeap);
+	for (int i = 0; i < MODEL_PARTS; i++)
+	{
+		SafeRelease(Base::Resources::Geometry::Dx12VBResources[i]);
+		SafeRelease(Base::Resources::Geometry::Dx12IBResources[i]);
 	}
 	
 	CloseHandle(Base::Synchronization::Dx12FenceEvent);
@@ -664,15 +681,15 @@ int CreateAccelerationStructures()
 		return 1;
 	}
 
-	ID3D12Resource1* mpVertexBuffer1 = createTriangleVB(&infiniMirror.meshGeometries[0]);
-	ID3D12Resource1* mpIndexBuffer1 = createTriangleIB(&infiniMirror.meshGeometries[0]);
-	ID3D12Resource1* mpVertexBuffer2 = createTriangleVB(&infiniMirror.meshGeometries[1]);
-	ID3D12Resource1* mpIndexBuffer2 = createTriangleIB(&infiniMirror.meshGeometries[1]);
+	Base::Resources::Geometry::Dx12VBResources[0] = createTriangleVB(&infiniMirror.meshGeometries[0]);
+	Base::Resources::Geometry::Dx12IBResources[0] = createTriangleIB(&infiniMirror.meshGeometries[0]);
+	Base::Resources::Geometry::Dx12VBResources[1] = createTriangleVB(&infiniMirror.meshGeometries[1]);
+	Base::Resources::Geometry::Dx12IBResources[1] = createTriangleIB(&infiniMirror.meshGeometries[1]);
 
 	D3D12_RAYTRACING_GEOMETRY_DESC geomDesc[2] = {};
 
-	SetupGeometryDesc(&geomDesc[0], mpVertexBuffer1, infiniMirror.meshGeometries[0].numVertecies, mpIndexBuffer1, infiniMirror.meshGeometries[0].numIndecies);
-	SetupGeometryDesc(&geomDesc[1], mpVertexBuffer2, infiniMirror.meshGeometries[1].numVertecies, mpIndexBuffer2, infiniMirror.meshGeometries[1].numIndecies);
+	SetupGeometryDesc(&geomDesc[0], Base::Resources::Geometry::Dx12VBResources[0], infiniMirror.meshGeometries[0].numVertecies, Base::Resources::Geometry::Dx12IBResources[0], infiniMirror.meshGeometries[0].numIndecies);
+	SetupGeometryDesc(&geomDesc[1], Base::Resources::Geometry::Dx12VBResources[1], infiniMirror.meshGeometries[1].numVertecies, Base::Resources::Geometry::Dx12IBResources[1], infiniMirror.meshGeometries[1].numIndecies);
 
 	createBottomLevelAS(Base::Queues::Compute::Dx12CommandList4, geomDesc, 1, &Base::Resources::DXR::BottomBuffers[0]);
 	createBottomLevelAS(Base::Queues::Compute::Dx12CommandList4, geomDesc + 1, 1, &Base::Resources::DXR::BottomBuffers[1]);
@@ -682,14 +699,54 @@ int CreateAccelerationStructures()
 	ID3D12CommandList* listsToExec[] = { Base::Queues::Compute::Dx12CommandList4 };
 	Base::Queues::Compute::Dx12Queue->ExecuteCommandLists(_countof(listsToExec), listsToExec);
 
+	Base::Resources::Geometry::numVertecies[0] = infiniMirror.meshGeometries[0].numVertecies;
+	Base::Resources::Geometry::numIndecies[0] = infiniMirror.meshGeometries[0].numIndecies;
+	Base::Resources::Geometry::numVertecies[1] = infiniMirror.meshGeometries[1].numVertecies;
+	Base::Resources::Geometry::numIndecies[1] = infiniMirror.meshGeometries[1].numIndecies;
+
+	
+	//Create descriptor heap for Vertex and Index Buffer views.
+	D3D12_DESCRIPTOR_HEAP_DESC dhd = {};
+	dhd.NumDescriptors = 2;
+	dhd.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+	dhd.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+
+	Base::Dx12Device->CreateDescriptorHeap(&dhd, IID_PPV_ARGS(&Base::Resources::Geometry::Dx12SRVDescriptorHeap));
+
+	Base::Resources::Geometry::Dx12SRVDescriptorStride = Base::Dx12Device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+	D3D12_CPU_DESCRIPTOR_HANDLE cdh = Base::Resources::Geometry::Dx12SRVDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
+
+	{
+		D3D12_SHADER_RESOURCE_VIEW_DESC srvd = {};
+		srvd.Format = DXGI_FORMAT_UNKNOWN;
+		srvd.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+		srvd.Buffer.FirstElement = 0;
+		srvd.Buffer.StructureByteStride = sizeof(Vertex);
+		srvd.Buffer.NumElements = Base::Resources::Geometry::numVertecies[0];
+		srvd.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
+		srvd.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+
+		Base::Dx12Device->CreateShaderResourceView(Base::Resources::Geometry::Dx12VBResources[0], &srvd, cdh);
+	}
+	cdh = Base::Resources::Geometry::Dx12SRVDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
+	cdh.ptr += Base::Resources::Geometry::Dx12SRVDescriptorStride;
+	{
+		D3D12_SHADER_RESOURCE_VIEW_DESC srvd = {};
+		srvd.Format = DXGI_FORMAT_UNKNOWN;
+		srvd.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+		srvd.Buffer.FirstElement = 0;
+		srvd.Buffer.StructureByteStride = sizeof(uint32_t);
+		srvd.Buffer.NumElements = Base::Resources::Geometry::numIndecies[0];
+		srvd.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
+		srvd.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+
+		Base::Dx12Device->CreateShaderResourceView(Base::Resources::Geometry::Dx12IBResources[0], &srvd, cdh);
+	}
+
+
 	WaitForCompute();
 
-	SafeRelease(&mpVertexBuffer1);
-	SafeRelease(&mpVertexBuffer2);
-	SafeRelease(&mpIndexBuffer1);
-	SafeRelease(&mpIndexBuffer2);
-
-	std::cout << "DXR Acceleration Structures setup successful\n";
+	std::cout << "DXR Acceleration Structures and geometry buffers setup successful\n";
 	return 0;
 }
 
@@ -738,13 +795,52 @@ ID3D12RootSignature* createRayGenLocalRootSignature()
 	return pRootSig;
 }
 
-ID3D12RootSignature* createHitGroupLocalRootSignature()
+ID3D12RootSignature* createMirrorHitGroupLocalRootSignature()
+{
+	D3D12_ROOT_PARAMETER rootParams[3]{};
+
+	rootParams[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
+	rootParams[0].Descriptor.RegisterSpace = 0;
+	rootParams[0].Descriptor.ShaderRegister = 1;
+
+	rootParams[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
+	rootParams[1].Descriptor.RegisterSpace = 0;
+	rootParams[1].Descriptor.ShaderRegister = 2;
+
+	rootParams[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+	rootParams[2].Constants.RegisterSpace = 1;
+	rootParams[2].Constants.ShaderRegister = 0;
+	rootParams[2].Constants.Num32BitValues = 3;
+
+	D3D12_ROOT_SIGNATURE_DESC desc = {};
+	desc.NumParameters = _countof(rootParams);
+	desc.pParameters = rootParams;
+	desc.Flags = D3D12_ROOT_SIGNATURE_FLAG_LOCAL_ROOT_SIGNATURE;
+
+
+	ID3DBlob* pSigBlob;
+	ID3DBlob* pErrorBlob;
+	HRESULT hr = D3D12SerializeRootSignature(&desc, D3D_ROOT_SIGNATURE_VERSION_1, &pSigBlob, &pErrorBlob);
+	if (FAILED(hr))
+	{
+		//std::string msg = convertBlobToString(pErrorBlob.GetInterfacePtr());
+		//std::cerr << msg << std::endl;
+		std::cerr << (char*)(pErrorBlob->GetBufferPointer()) << std::endl;
+		return nullptr;
+	}
+	ID3D12RootSignature* pRootSig;
+	Base::Dx12Device->CreateRootSignature(0, pSigBlob->GetBufferPointer(), pSigBlob->GetBufferSize(), IID_PPV_ARGS(&pRootSig));
+
+	return pRootSig;
+}
+
+ID3D12RootSignature* createEdgesHitGroupLocalRootSignature()
 {
 	D3D12_ROOT_PARAMETER rootParams[1]{};
 
 	//float3 ShaderTableColor;
 	rootParams[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-	rootParams[0].Constants.RegisterSpace = 1;
+	rootParams[0].Constants.RegisterSpace = 2;
 	rootParams[0].Constants.ShaderRegister = 0;
 	rootParams[0].Constants.Num32BitValues = 3;
 
@@ -799,7 +895,7 @@ ID3D12RootSignature* createGlobalRootSignature()
 	rootParams[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
 	rootParams[0].Constants.RegisterSpace = 0;
 	rootParams[0].Constants.ShaderRegister = 0;
-	rootParams[0].Constants.Num32BitValues = 1;
+	rootParams[0].Constants.Num32BitValues = 2;
 
 	D3D12_ROOT_SIGNATURE_DESC desc = {};
 	desc.NumParameters = _countof(rootParams);
@@ -906,23 +1002,41 @@ int CreateRaytracingPipelineState()
 	soRayGenLocalRootAssociation->pDesc = &rayGenLocalRootAssociation;
 
 
-	//Init hit group local root signature
-	ID3D12RootSignature* hitGroupLocalRoot = createHitGroupLocalRootSignature();
-	D3D12_STATE_SUBOBJECT* soHitGroupLocalRoot = nextSubobject();
-	soHitGroupLocalRoot->Type = D3D12_STATE_SUBOBJECT_TYPE_LOCAL_ROOT_SIGNATURE;
-	soHitGroupLocalRoot->pDesc = &hitGroupLocalRoot;
+	//Init mirror hit group local root signature
+	ID3D12RootSignature* mirrorHitGroupLocalRoot = createMirrorHitGroupLocalRootSignature();
+	D3D12_STATE_SUBOBJECT* soMirrorHitGroupLocalRoot = nextSubobject();
+	soMirrorHitGroupLocalRoot->Type = D3D12_STATE_SUBOBJECT_TYPE_LOCAL_ROOT_SIGNATURE;
+	soMirrorHitGroupLocalRoot->pDesc = &mirrorHitGroupLocalRoot;
 
 
-	//Bind local root signature to hit group shaders
-	D3D12_SUBOBJECT_TO_EXPORTS_ASSOCIATION hitGroupLocalRootAssociation;
-	LPCWSTR hitGroupLocalRootAssociationShaderNames[] = { sClosestHitMirror, sClosestHitEdges };
-	hitGroupLocalRootAssociation.pExports = hitGroupLocalRootAssociationShaderNames;
-	hitGroupLocalRootAssociation.NumExports = _countof(hitGroupLocalRootAssociationShaderNames);
-	hitGroupLocalRootAssociation.pSubobjectToAssociate = soHitGroupLocalRoot; //<-- address to local root subobject
+	//Bind local root signature to mirror hit group shaders
+	D3D12_SUBOBJECT_TO_EXPORTS_ASSOCIATION mirrorHitGroupLocalRootAssociation;
+	LPCWSTR mirrorHitGroupLocalRootAssociationShaderNames[] = { sClosestHitMirror };
+	mirrorHitGroupLocalRootAssociation.pExports = mirrorHitGroupLocalRootAssociationShaderNames;
+	mirrorHitGroupLocalRootAssociation.NumExports = _countof(mirrorHitGroupLocalRootAssociationShaderNames);
+	mirrorHitGroupLocalRootAssociation.pSubobjectToAssociate = soMirrorHitGroupLocalRoot; //<-- address to local root subobject
 
-	D3D12_STATE_SUBOBJECT* soHitGroupLocalRootAssociation = nextSubobject();
-	soHitGroupLocalRootAssociation->Type = D3D12_STATE_SUBOBJECT_TYPE_SUBOBJECT_TO_EXPORTS_ASSOCIATION;
-	soHitGroupLocalRootAssociation->pDesc = &hitGroupLocalRootAssociation;
+	D3D12_STATE_SUBOBJECT* soMirrorEdgesHitGroupLocalRootAssociation = nextSubobject();
+	soMirrorEdgesHitGroupLocalRootAssociation->Type = D3D12_STATE_SUBOBJECT_TYPE_SUBOBJECT_TO_EXPORTS_ASSOCIATION;
+	soMirrorEdgesHitGroupLocalRootAssociation->pDesc = &mirrorHitGroupLocalRootAssociation;
+
+	//Init edges hit group local root signature
+	ID3D12RootSignature* edgesHitGroupLocalRoot = createEdgesHitGroupLocalRootSignature();
+	D3D12_STATE_SUBOBJECT* soEdgesHitGroupLocalRoot = nextSubobject();
+	soEdgesHitGroupLocalRoot->Type = D3D12_STATE_SUBOBJECT_TYPE_LOCAL_ROOT_SIGNATURE;
+	soEdgesHitGroupLocalRoot->pDesc = &edgesHitGroupLocalRoot;
+
+
+	//Bind local root signature to edges hit group shaders
+	D3D12_SUBOBJECT_TO_EXPORTS_ASSOCIATION edgesHitGroupLocalRootAssociation;
+	LPCWSTR edgesHitGroupLocalRootAssociationShaderNames[] = { sClosestHitEdges };
+	edgesHitGroupLocalRootAssociation.pExports = edgesHitGroupLocalRootAssociationShaderNames;
+	edgesHitGroupLocalRootAssociation.NumExports = _countof(edgesHitGroupLocalRootAssociationShaderNames);
+	edgesHitGroupLocalRootAssociation.pSubobjectToAssociate = soEdgesHitGroupLocalRoot; //<-- address to local root subobject
+
+	D3D12_STATE_SUBOBJECT* soEdgesHitGroupLocalRootAssociation = nextSubobject();
+	soEdgesHitGroupLocalRootAssociation->Type = D3D12_STATE_SUBOBJECT_TYPE_SUBOBJECT_TO_EXPORTS_ASSOCIATION;
+	soEdgesHitGroupLocalRootAssociation->pDesc = &edgesHitGroupLocalRootAssociation;
 
 
 	//Init miss local root signature
@@ -967,7 +1081,7 @@ int CreateRaytracingPipelineState()
 
 	//Init pipeline config
 	D3D12_RAYTRACING_PIPELINE_CONFIG pipelineConfig;
-	pipelineConfig.MaxTraceRecursionDepth = 1;
+	pipelineConfig.MaxTraceRecursionDepth = MAX_RAY_BOUNCES;
 
 	D3D12_STATE_SUBOBJECT* soPipelineConfig = nextSubobject();
 	soPipelineConfig->Type = D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_PIPELINE_CONFIG;
@@ -994,7 +1108,8 @@ int CreateRaytracingPipelineState()
 
 	//release local root signatures
 	SafeRelease(&rayGenLocalRoot);
-	SafeRelease(&hitGroupLocalRoot);
+	SafeRelease(&mirrorHitGroupLocalRoot);
+	SafeRelease(&edgesHitGroupLocalRoot);
 	SafeRelease(&missLocalRoot);
 
 	std::cout << "Ray tracing pipeline state setup done\n";
@@ -1106,31 +1221,41 @@ int CreateShaderTables()
 			Base::Resources::DXR::Shaders::MissShaderTable.Resource->Unmap(0, nullptr);
 		}
 
-		//hit program
+		//hit programs
 		{
 
-			struct alignas(D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT) HIT_GROUP_SHADER_TABLE_DATA
+			struct alignas(D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT) HIT_GROUP_MIRROR_SHADER_TABLE_DATA
+			{
+				unsigned char ShaderIdentifier[D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES];
+				UINT64 vertDescriptor;
+				UINT64 indDescriptor;
+				float ShaderTableColor[3];
+			} mirrorTableData{};
+
+			struct alignas(D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT) HIT_GROUP_EDGES_SHADER_TABLE_DATA
 			{
 				unsigned char ShaderIdentifier[D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES];
 				float ShaderTableColor[3];
-			} tableData[MODEL_PARTS]{};
+			} edgesTableData{};
+
+			memcpy(mirrorTableData.ShaderIdentifier, pRtsoProps->GetShaderIdentifier(sHitGroupMirror), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+			mirrorTableData.vertDescriptor = Base::Resources::Geometry::Dx12VBResources[0]->GetGPUVirtualAddress();
+			mirrorTableData.indDescriptor = Base::Resources::Geometry::Dx12IBResources[0]->GetGPUVirtualAddress();
+			mirrorTableData.ShaderTableColor[0] = 1.0f;
+			mirrorTableData.ShaderTableColor[1] = 1.0f;
+			mirrorTableData.ShaderTableColor[2] = 0.0f;
 
 			const float luminance = 2.0f / 3.0f;
-
-			memcpy(tableData[0].ShaderIdentifier, pRtsoProps->GetShaderIdentifier(sHitGroupMirror), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
-			tableData[0].ShaderTableColor[0] = luminance;
-			tableData[0].ShaderTableColor[1] = luminance;
-			tableData[0].ShaderTableColor[2] = luminance;
-
-			memcpy(tableData[1].ShaderIdentifier, pRtsoProps->GetShaderIdentifier(sHitGroupEdges), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
-			tableData[1].ShaderTableColor[0] = luminance;
-			tableData[1].ShaderTableColor[1] = luminance;
-			tableData[1].ShaderTableColor[2] = luminance;
+			memcpy(edgesTableData.ShaderIdentifier, pRtsoProps->GetShaderIdentifier(sHitGroupEdges), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+			edgesTableData.ShaderTableColor[0] = luminance;
+			edgesTableData.ShaderTableColor[1] = luminance;
+			edgesTableData.ShaderTableColor[2] = luminance;
 
 			//how big is the biggest?
 			union MaxSize
 			{
-				HIT_GROUP_SHADER_TABLE_DATA data0;
+				HIT_GROUP_MIRROR_SHADER_TABLE_DATA data0;
+				HIT_GROUP_EDGES_SHADER_TABLE_DATA data1;
 			};
 
 			Base::Resources::DXR::Shaders::HitGroupShaderTable.StrideInBytes = sizeof(MaxSize);
@@ -1140,7 +1265,8 @@ int CreateShaderTables()
 			// Map the buffer
 			void* pData;
 			Base::Resources::DXR::Shaders::HitGroupShaderTable.Resource->Map(0, nullptr, &pData);
-			memcpy(pData, &tableData, sizeof(tableData));
+			memcpy(pData, &mirrorTableData, sizeof(mirrorTableData));
+			memcpy((void*)((char*)pData + sizeof(MaxSize)), &edgesTableData, sizeof(edgesTableData));
 			Base::Resources::DXR::Shaders::HitGroupShaderTable.Resource->Unmap(0, nullptr);
 		}
 
@@ -1209,9 +1335,10 @@ void Render()
 	// Bind the empty root signature
 	Base::Queues::Compute::Dx12CommandList4->SetComputeRootSignature(Base::Resources::DXR::Dx12GlobalRS);
 
-	// Set float RedChannel; in global root signature
+	// Set parameters in global root signature
 	float redColor = 1.0f;
 	Base::Queues::Compute::Dx12CommandList4->SetComputeRoot32BitConstant(0, *reinterpret_cast<UINT*>(&redColor), 0);
+	Base::Queues::Compute::Dx12CommandList4->SetComputeRoot32BitConstant(0, MAX_RAY_BOUNCES, 1);
 
 	// Dispatch
 	Base::Queues::Compute::Dx12CommandList4->SetPipelineState1(Base::States::DXRPipelineState);
