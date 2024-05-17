@@ -23,11 +23,6 @@ struct Index
 StructuredBuffer<Vertex> Vertecies : register(t1);
 StructuredBuffer<uint> Indecies : register(t2);
 
-cbuffer CB_MirrorShaderTableLocal : register(b0, space1)
-{
-    float3 TestTableColor;
-}
-
 //Edges Resources
 cbuffer CB_EdgesShaderTableLocal : register(b0, space2)
 {
@@ -37,6 +32,7 @@ cbuffer CB_EdgesShaderTableLocal : register(b0, space2)
 struct RayPayload
 {
 	float3 color;
+    uint depth;
 };
 
 [shader("raygeneration")]
@@ -58,7 +54,7 @@ void rayGen()
 	ray.TMin = 0;
 	ray.TMax = 100000;
 
-    RayPayload payload = { float3(1.0f, 1.0f, 1.0f) };
+    RayPayload payload = { float3(1.0f, 1.0f, 1.0f), 1 };
     TraceRay(gRtScene, RAY_FLAG_CULL_BACK_FACING_TRIANGLES /*rayFlags*/, 0xFF, 0 /* ray index*/, 0, 0, ray, payload);
 	gOutput[launchIndex.xy] = float4(payload.color, 1);
 }
@@ -66,16 +62,24 @@ void rayGen()
 [shader("miss")]
 void miss(inout RayPayload payload)
 {
-	payload.color = float3(0.4f, 0.6f, 0.3f);
+	payload.color = float3(0.0f, 0.0f, 0.0f);
 }
 
 [shader("closesthit")]
 void closestHit_mirror(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attribs)
 {
 	//for info
-	float3 barycentrics = float3(1.0 - attribs.barycentrics.x - attribs.barycentrics.y, attribs.barycentrics.x, attribs.barycentrics.y);
-	uint instanceID = InstanceID();
-	uint primitiveID = PrimitiveIndex();
+    float3 barycentrics = float3(1.0 - attribs.barycentrics.x - attribs.barycentrics.y, attribs.barycentrics.x, attribs.barycentrics.y);
+    uint instanceID = InstanceID();
+    uint primitiveID = PrimitiveIndex();
+    
+    float absorption = 1.0f / float(MaxRecursion);
+    payload.color -= float3(absorption, absorption, absorption);
+    
+    if (payload.depth >= MaxRecursion)
+        return;
+    
+    payload.depth++;
 	
     Vertex vtx0 = Vertecies[Indecies[primitiveID * 3 + 0]];
     Vertex vtx1 = Vertecies[Indecies[primitiveID * 3 + 1]];
@@ -83,11 +87,19 @@ void closestHit_mirror(inout RayPayload payload, in BuiltInTriangleIntersectionA
 	
     float3 interPos = vtx0.pos * barycentrics.x + vtx1.pos * barycentrics.y + vtx2.pos * barycentrics.z;
     float3 interNorm = normalize(vtx0.norm * barycentrics.x + vtx1.norm * barycentrics.y + vtx2.norm * barycentrics.z);
-	
-    float absorption = 1.0f / float(MaxRecursion);
-    payload.color -= float3(absorption, absorption, absorption);
     
-    payload.color = float3(float(Indecies[primitiveID]) / 80, 0.0f, 0.0f);
+    //float3 worldRayOrigin = WorldRayOrigin() + WorldRayDirection() * RayTCurrent();
+    float3 worldRayOrigin = mul(float4(interPos, 1.0f), ObjectToWorld4x3());
+    float3 worldNormal = normalize(mul(interNorm, (float3x3) ObjectToWorld4x3()));
+    
+    RayDesc ray;
+    ray.Origin = worldRayOrigin;
+    ray.Direction = normalize(reflect(WorldRayDirection(), worldNormal));
+    
+    ray.TMin = 0;
+    ray.TMax = 100000;
+    //payload.color = worldNormal;
+    TraceRay(gRtScene, RAY_FLAG_CULL_BACK_FACING_TRIANGLES /*rayFlags*/, 0xFF, 0 /* ray index*/, 0, 0, ray, payload);
 }
 
 [shader("closesthit")]

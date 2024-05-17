@@ -125,8 +125,6 @@ namespace Base
 			uint32_t numIndecies[MODEL_PARTS];
 			ID3D12Resource1* Dx12VBResources[MODEL_PARTS];
 			ID3D12Resource1* Dx12IBResources[MODEL_PARTS];
-			ID3D12DescriptorHeap* Dx12SRVDescriptorHeap;
-			UINT Dx12SRVDescriptorStride;
 		}
 	}
 
@@ -226,7 +224,6 @@ void DX12Free()
 		SafeRelease(&Base::Resources::Backbuffers::Dx12RTVResources[i]);
 	}
 
-	SafeRelease(Base::Resources::Geometry::Dx12SRVDescriptorHeap);
 	for (int i = 0; i < MODEL_PARTS; i++)
 	{
 		SafeRelease(Base::Resources::Geometry::Dx12VBResources[i]);
@@ -704,46 +701,6 @@ int CreateAccelerationStructures()
 	Base::Resources::Geometry::numVertecies[1] = infiniMirror.meshGeometries[1].numVertecies;
 	Base::Resources::Geometry::numIndecies[1] = infiniMirror.meshGeometries[1].numIndecies;
 
-	
-	//Create descriptor heap for Vertex and Index Buffer views.
-	D3D12_DESCRIPTOR_HEAP_DESC dhd = {};
-	dhd.NumDescriptors = 2;
-	dhd.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-	dhd.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-
-	Base::Dx12Device->CreateDescriptorHeap(&dhd, IID_PPV_ARGS(&Base::Resources::Geometry::Dx12SRVDescriptorHeap));
-
-	Base::Resources::Geometry::Dx12SRVDescriptorStride = Base::Dx12Device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-	D3D12_CPU_DESCRIPTOR_HANDLE cdh = Base::Resources::Geometry::Dx12SRVDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
-
-	{
-		D3D12_SHADER_RESOURCE_VIEW_DESC srvd = {};
-		srvd.Format = DXGI_FORMAT_UNKNOWN;
-		srvd.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
-		srvd.Buffer.FirstElement = 0;
-		srvd.Buffer.StructureByteStride = sizeof(Vertex);
-		srvd.Buffer.NumElements = Base::Resources::Geometry::numVertecies[0];
-		srvd.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
-		srvd.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-
-		Base::Dx12Device->CreateShaderResourceView(Base::Resources::Geometry::Dx12VBResources[0], &srvd, cdh);
-	}
-	cdh = Base::Resources::Geometry::Dx12SRVDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
-	cdh.ptr += Base::Resources::Geometry::Dx12SRVDescriptorStride;
-	{
-		D3D12_SHADER_RESOURCE_VIEW_DESC srvd = {};
-		srvd.Format = DXGI_FORMAT_UNKNOWN;
-		srvd.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
-		srvd.Buffer.FirstElement = 0;
-		srvd.Buffer.StructureByteStride = sizeof(uint32_t);
-		srvd.Buffer.NumElements = Base::Resources::Geometry::numIndecies[0];
-		srvd.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
-		srvd.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-
-		Base::Dx12Device->CreateShaderResourceView(Base::Resources::Geometry::Dx12IBResources[0], &srvd, cdh);
-	}
-
-
 	WaitForCompute();
 
 	std::cout << "DXR Acceleration Structures and geometry buffers setup successful\n";
@@ -797,20 +754,33 @@ ID3D12RootSignature* createRayGenLocalRootSignature()
 
 ID3D12RootSignature* createMirrorHitGroupLocalRootSignature()
 {
+	D3D12_DESCRIPTOR_RANGE range[2]{};
 	D3D12_ROOT_PARAMETER rootParams[3]{};
 
-	rootParams[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
-	rootParams[0].Descriptor.RegisterSpace = 0;
-	rootParams[0].Descriptor.ShaderRegister = 1;
+	range[0].BaseShaderRegister = 0;
+	range[0].NumDescriptors = 1;
+	range[0].RegisterSpace = 0;
+	range[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
+	range[0].OffsetInDescriptorsFromTableStart = 0;
+
+	// gRtScene
+	range[1].BaseShaderRegister = 0;
+	range[1].NumDescriptors = 1;
+	range[1].RegisterSpace = 0;
+	range[1].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+	range[1].OffsetInDescriptorsFromTableStart = 1;
+
+	rootParams[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+	rootParams[0].DescriptorTable.NumDescriptorRanges = _countof(range);
+	rootParams[0].DescriptorTable.pDescriptorRanges = range;
 
 	rootParams[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
 	rootParams[1].Descriptor.RegisterSpace = 0;
-	rootParams[1].Descriptor.ShaderRegister = 2;
+	rootParams[1].Descriptor.ShaderRegister = 1;
 
-	rootParams[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-	rootParams[2].Constants.RegisterSpace = 1;
-	rootParams[2].Constants.ShaderRegister = 0;
-	rootParams[2].Constants.Num32BitValues = 3;
+	rootParams[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
+	rootParams[2].Descriptor.RegisterSpace = 0;
+	rootParams[2].Descriptor.ShaderRegister = 2;
 
 	D3D12_ROOT_SIGNATURE_DESC desc = {};
 	desc.NumParameters = _countof(rootParams);
@@ -1061,7 +1031,7 @@ int CreateRaytracingPipelineState()
 	//Init shader config
 	D3D12_RAYTRACING_SHADER_CONFIG shaderConfig = {};
 	shaderConfig.MaxAttributeSizeInBytes = sizeof(float) * 2;
-	shaderConfig.MaxPayloadSizeInBytes = sizeof(float) * 3;
+	shaderConfig.MaxPayloadSizeInBytes = sizeof(float) * 3 + sizeof(UINT) * 1;
 
 	D3D12_STATE_SUBOBJECT* soShaderConfig = nextSubobject();
 	soShaderConfig->Type = D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_SHADER_CONFIG;
@@ -1081,7 +1051,7 @@ int CreateRaytracingPipelineState()
 
 	//Init pipeline config
 	D3D12_RAYTRACING_PIPELINE_CONFIG pipelineConfig;
-	pipelineConfig.MaxTraceRecursionDepth = MAX_RAY_BOUNCES;
+	pipelineConfig.MaxTraceRecursionDepth = MAX_RAY_DEPTH;
 
 	D3D12_STATE_SUBOBJECT* soPipelineConfig = nextSubobject();
 	soPipelineConfig->Type = D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_PIPELINE_CONFIG;
@@ -1227,9 +1197,9 @@ int CreateShaderTables()
 			struct alignas(D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT) HIT_GROUP_MIRROR_SHADER_TABLE_DATA
 			{
 				unsigned char ShaderIdentifier[D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES];
+				UINT64 RTVDescriptor;
 				UINT64 vertDescriptor;
 				UINT64 indDescriptor;
-				float ShaderTableColor[3];
 			} mirrorTableData{};
 
 			struct alignas(D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT) HIT_GROUP_EDGES_SHADER_TABLE_DATA
@@ -1239,11 +1209,9 @@ int CreateShaderTables()
 			} edgesTableData{};
 
 			memcpy(mirrorTableData.ShaderIdentifier, pRtsoProps->GetShaderIdentifier(sHitGroupMirror), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+			mirrorTableData.RTVDescriptor = Base::Resources::DXR::Dx12RTDescriptorHeap->GetGPUDescriptorHandleForHeapStart().ptr;
 			mirrorTableData.vertDescriptor = Base::Resources::Geometry::Dx12VBResources[0]->GetGPUVirtualAddress();
 			mirrorTableData.indDescriptor = Base::Resources::Geometry::Dx12IBResources[0]->GetGPUVirtualAddress();
-			mirrorTableData.ShaderTableColor[0] = 1.0f;
-			mirrorTableData.ShaderTableColor[1] = 1.0f;
-			mirrorTableData.ShaderTableColor[2] = 0.0f;
 
 			const float luminance = 2.0f / 3.0f;
 			memcpy(edgesTableData.ShaderIdentifier, pRtsoProps->GetShaderIdentifier(sHitGroupEdges), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
@@ -1338,7 +1306,7 @@ void Render()
 	// Set parameters in global root signature
 	float redColor = 1.0f;
 	Base::Queues::Compute::Dx12CommandList4->SetComputeRoot32BitConstant(0, *reinterpret_cast<UINT*>(&redColor), 0);
-	Base::Queues::Compute::Dx12CommandList4->SetComputeRoot32BitConstant(0, MAX_RAY_BOUNCES, 1);
+	Base::Queues::Compute::Dx12CommandList4->SetComputeRoot32BitConstant(0, MAX_RAY_DEPTH, 1);
 
 	// Dispatch
 	Base::Queues::Compute::Dx12CommandList4->SetPipelineState1(Base::States::DXRPipelineState);
