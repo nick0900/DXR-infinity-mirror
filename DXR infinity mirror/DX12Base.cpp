@@ -754,25 +754,11 @@ ID3D12RootSignature* createRayGenLocalRootSignature()
 
 ID3D12RootSignature* createMirrorHitGroupLocalRootSignature()
 {
-	D3D12_DESCRIPTOR_RANGE range[2]{};
 	D3D12_ROOT_PARAMETER rootParams[3]{};
 
-	range[0].BaseShaderRegister = 0;
-	range[0].NumDescriptors = 1;
-	range[0].RegisterSpace = 0;
-	range[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
-	range[0].OffsetInDescriptorsFromTableStart = 0;
-
-	// gRtScene
-	range[1].BaseShaderRegister = 0;
-	range[1].NumDescriptors = 1;
-	range[1].RegisterSpace = 0;
-	range[1].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-	range[1].OffsetInDescriptorsFromTableStart = 1;
-
-	rootParams[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-	rootParams[0].DescriptorTable.NumDescriptorRanges = _countof(range);
-	rootParams[0].DescriptorTable.pDescriptorRanges = range;
+	rootParams[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
+	rootParams[0].Descriptor.RegisterSpace = 0;
+	rootParams[0].Descriptor.ShaderRegister = 0;
 
 	rootParams[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
 	rootParams[1].Descriptor.RegisterSpace = 0;
@@ -1209,7 +1195,7 @@ int CreateShaderTables()
 			} edgesTableData{};
 
 			memcpy(mirrorTableData.ShaderIdentifier, pRtsoProps->GetShaderIdentifier(sHitGroupMirror), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
-			mirrorTableData.RTVDescriptor = Base::Resources::DXR::Dx12RTDescriptorHeap->GetGPUDescriptorHandleForHeapStart().ptr;
+			mirrorTableData.RTVDescriptor = Base::Resources::DXR::TopBuffers.pResult->GetGPUVirtualAddress();
 			mirrorTableData.vertDescriptor = Base::Resources::Geometry::Dx12VBResources[0]->GetGPUVirtualAddress();
 			mirrorTableData.indDescriptor = Base::Resources::Geometry::Dx12IBResources[0]->GetGPUVirtualAddress();
 
