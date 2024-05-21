@@ -4,15 +4,15 @@
 
 // Window init
 #define APPLICATION_NAME L"Infinimirror_Test" //The name of the application and window
-const unsigned int SCREEN_WIDTH = 640; //Width of application.
-const unsigned int SCREEN_HEIGHT = 480;	//Height of application.
+const unsigned int SCREEN_WIDTH = 1920; //Width of application.
+const unsigned int SCREEN_HEIGHT = 1080;	//Height of application.
 //
 
 // DX config
 const D3D_FEATURE_LEVEL MINIMUM_FEATURE_LEVEL = D3D_FEATURE_LEVEL_12_1;
 const unsigned int NUM_SWAP_BUFFERS = 2; //Number of buffers
 
-const unsigned int MAX_RAY_DEPTH = 10;
+const unsigned int MAX_RAY_DEPTH = 20;
 
 //Shader Names
 #define RAY_GEN_SHADER_NAME L"rayGen";

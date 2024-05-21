@@ -1315,6 +1315,14 @@ void Render()
 	//Close the list to prepare it for execution.
 	Base::Queues::Compute::Dx12CommandList4->Close();
 
+	WaitForDirect(); //Wait for GPU to finish.
+	//NOT BEST PRACTICE, only used as such for simplicity.
+	{
+		//Execute the command list.
+		ID3D12CommandList* listsToExecute[] = { Base::Queues::Compute::Dx12CommandList4 };
+		Base::Queues::Compute::Dx12Queue->ExecuteCommandLists(ARRAYSIZE(listsToExecute), listsToExecute);
+	}
+
 
 	Base::Queues::Direct::Dx12CommandAllocator->Reset();
 	Base::Queues::Direct::Dx12CommandList4->Reset(Base::Queues::Direct::Dx12CommandAllocator, nullptr);
@@ -1331,12 +1339,6 @@ void Render()
 	//Close the list to prepare it for execution.
 	Base::Queues::Direct::Dx12CommandList4->Close();
 
-	{
-		//Execute the command list.
-		ID3D12CommandList* listsToExecute[] = { Base::Queues::Compute::Dx12CommandList4 };
-		Base::Queues::Compute::Dx12Queue->ExecuteCommandLists(ARRAYSIZE(listsToExecute), listsToExecute);
-	}
-
 	WaitForCompute();
 
 	{
@@ -1348,7 +1350,4 @@ void Render()
 	//Present the frame.
 	DXGI_PRESENT_PARAMETERS pp = {};
 	Base::DxgiSwapChain4->Present1(0, 0, &pp);
-
-	WaitForDirect(); //Wait for GPU to finish.
-	//NOT BEST PRACTICE, only used as such for simplicity.
 }

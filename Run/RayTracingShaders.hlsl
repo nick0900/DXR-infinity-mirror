@@ -48,7 +48,7 @@ void rayGen()
 	float aspectRatio = dims.x / dims.y;
 
 	RayDesc ray;
-	ray.Origin = float3(0, 0, -2);
+	ray.Origin = float3(0, 0, -1.5f);
 	ray.Direction = normalize(float3(d.x * aspectRatio, -d.y, 1));
 
 	ray.TMin = 0;
