@@ -11,3 +11,9 @@ void DX12Free();
 void Update();
 
 void Render();
+
+void ComputeLoop();
+
+void DirectLoop();
+
+void TerminateLoops();

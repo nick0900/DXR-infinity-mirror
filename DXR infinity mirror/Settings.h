@@ -10,9 +10,11 @@ const unsigned int SCREEN_HEIGHT = 1080;	//Height of application.
 
 // DX config
 const D3D_FEATURE_LEVEL MINIMUM_FEATURE_LEVEL = D3D_FEATURE_LEVEL_12_1;
-const unsigned int NUM_SWAP_BUFFERS = 2; //Number of buffers
+const unsigned int NUM_SWAP_BUFFERS = 2;
 
-const unsigned int MAX_RAY_DEPTH = 20;
+const unsigned int MAX_RAY_DEPTH = 31;
+
+const DWORD EVENT_TIMEOUT_MILLISECONDS = 1000; //one second
 
 //Shader Names
 #define RAY_GEN_SHADER_NAME L"rayGen";
@@ -24,4 +26,4 @@ const unsigned int MAX_RAY_DEPTH = 20;
 #define EDGES_CLOSEST_HIT_SHADER_NAME L"closestHit_edges";
 //
 
-#define MODEL_PARTS 2
+#define MODEL_PARTS 2 //do not modify, current geometry loading is unfinished and assumes value 2

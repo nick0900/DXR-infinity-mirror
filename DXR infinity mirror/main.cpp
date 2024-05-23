@@ -37,6 +37,9 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 			WaitForDirect();
 
 			ShowWindow(wndHandle, nCmdShow);
+
+			std::thread computeLoop(ComputeLoop);
+			std::thread directLoop(DirectLoop);
 			while (WM_QUIT != msg.message)
 			{
 				if (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE))
@@ -44,12 +47,11 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 					TranslateMessage(&msg);
 					DispatchMessage(&msg);
 				}
-				else
-				{
-					Update();
-					Render();
-				}
 			}
+
+			TerminateLoops();
+			computeLoop.join();
+			directLoop.join();
 		}
 	} while (false);
 
