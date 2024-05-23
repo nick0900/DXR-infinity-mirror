@@ -433,7 +433,7 @@ int CreateSwapChain(HWND wndHandle)
 	scDesc.BufferCount = NUM_SWAP_BUFFERS;
 	scDesc.Scaling = DXGI_SCALING_NONE;
 	scDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-	scDesc.Flags = 0;
+	scDesc.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
 	scDesc.AlphaMode = DXGI_ALPHA_MODE_UNSPECIFIED;
 
 	IDXGISwapChain1* swapChain1 = nullptr;
@@ -1472,7 +1472,7 @@ void DirectLoop()
 		{
 			//Present the frame.
 			DXGI_PRESENT_PARAMETERS pp = {};
-			Base::DxgiSwapChain4->Present1(0, 0, &pp);
+			Base::DxgiSwapChain4->Present1(0, DXGI_PRESENT_ALLOW_TEARING, &pp);
 		}
 
 
@@ -1497,7 +1497,7 @@ void DirectLoop()
 		{
 			//Present the frame.
 			DXGI_PRESENT_PARAMETERS pp = {};
-			Base::DxgiSwapChain4->Present1(0, 0, &pp);
+			Base::DxgiSwapChain4->Present1(0, DXGI_PRESENT_ALLOW_TEARING, &pp);
 		}
 	}
 }
