@@ -67,7 +67,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 
 	DX12Free();
 
-	WriteResults("720p.csv");
+	WriteResults(RESULT_SAVE_PATH);
 
 #ifdef _DEBUG
 	system("pause");
