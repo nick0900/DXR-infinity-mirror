@@ -38,3 +38,5 @@ const DWORD EVENT_TIMEOUT_MILLISECONDS = 1000; //one second
 
 // Frame measuring
 const uint32_t FRAMES_FOR_AVERAGE_CALCULATION = 1000;
+#define RESULT_SAVE_PATH "720p.csv"
+//
