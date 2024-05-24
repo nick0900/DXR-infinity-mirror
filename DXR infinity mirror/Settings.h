@@ -12,9 +12,9 @@ const unsigned int SCREEN_HEIGHT = 2160;	//Height of application.
 const D3D_FEATURE_LEVEL MINIMUM_FEATURE_LEVEL = D3D_FEATURE_LEVEL_12_1;
 const unsigned int NUM_SWAP_BUFFERS = 2;
 
-const unsigned int MAX_RAY_DEPTH = 5; //the depth of the infinity mirror. between 1 and 31.
+const unsigned int MAX_RAY_DEPTH = 31; //the depth of the infinity mirror. between 1 and 31.
 
-const float REFLECTON_BIAS = 0.000001f; //Required for more complicated geometries, such as the mirrorTestSmooth model.
+const float REFLECTON_BIAS = 0.00001f; //Required for more complicated geometries, such as the mirrorTestSmooth model.
 										//it displaces the reflected ray's positions along the surface normal to ensure they don't miss the surface due to floating point errors
 
 const DWORD EVENT_TIMEOUT_MILLISECONDS = 1000; //one second
