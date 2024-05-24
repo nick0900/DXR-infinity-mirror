@@ -1285,11 +1285,10 @@ int CreateShaderTables()
 			mirrorTableData.vertDescriptor = Base::Resources::Geometry::Dx12VBResources[0]->GetGPUVirtualAddress();
 			mirrorTableData.indDescriptor = Base::Resources::Geometry::Dx12IBResources[0]->GetGPUVirtualAddress();
 
-			const float luminance = 2.0f / 3.0f;
 			memcpy(edgesTableData.ShaderIdentifier, pRtsoProps->GetShaderIdentifier(sHitGroupEdges), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
-			edgesTableData.ShaderTableColor[0] = luminance;
-			edgesTableData.ShaderTableColor[1] = luminance;
-			edgesTableData.ShaderTableColor[2] = luminance;
+			edgesTableData.ShaderTableColor[0] = 2.0f / 3.0f;
+			edgesTableData.ShaderTableColor[1] = 2.0f / 3.0f;
+			edgesTableData.ShaderTableColor[2] = 1.0f;
 
 			//how big is the biggest?
 			union MaxSize
@@ -1367,9 +1366,8 @@ void RecordDispatchList(ID3D12CommandAllocator* commandAllocator, ID3D12Graphics
 	commandList->SetComputeRootSignature(Base::Resources::DXR::Dx12GlobalRS);
 
 	// Set parameters in global root signature
-	float redColor = 1.0f;
-	commandList->SetComputeRoot32BitConstant(0, *reinterpret_cast<UINT*>(&redColor), 0);
-	commandList->SetComputeRoot32BitConstant(0, MAX_RAY_DEPTH, 1);
+	commandList->SetComputeRoot32BitConstant(0, MAX_RAY_DEPTH, 0);
+	commandList->SetComputeRoot32BitConstant(0, *(UINT*)((void*)&REFLECTON_BIAS), 1);
 
 	// Dispatch
 	commandList->SetPipelineState1(Base::States::DXRPipelineState);

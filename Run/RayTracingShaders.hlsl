@@ -3,8 +3,8 @@ RWTexture2D<float4> gOutput : register(u0);
 
 cbuffer CB_Global : register(b0, space0)
 {
-	float RedChannel;
     uint MaxRecursion;
+    float ReflectionBias;
 }
 
 //Mirror Resources
@@ -13,11 +13,6 @@ struct Vertex
     float3 pos;
     float3 norm;
     float2 uv;
-};
-
-struct Index
-{
-    uint i;
 };
 
 StructuredBuffer<Vertex> Vertecies : register(t1);
@@ -88,9 +83,9 @@ void closestHit_mirror(inout RayPayload payload, in BuiltInTriangleIntersectionA
     float3 interPos = vtx0.pos * barycentrics.x + vtx1.pos * barycentrics.y + vtx2.pos * barycentrics.z;
     float3 interNorm = normalize(vtx0.norm * barycentrics.x + vtx1.norm * barycentrics.y + vtx2.norm * barycentrics.z);
     
-    //float3 worldRayOrigin = WorldRayOrigin() + WorldRayDirection() * RayTCurrent();
     float3 worldRayOrigin = mul(float4(interPos, 1.0f), ObjectToWorld4x3());
     float3 worldNormal = normalize(mul(interNorm, (float3x3) ObjectToWorld4x3()));
+    worldRayOrigin += worldNormal * ReflectionBias;
     
     RayDesc ray;
     ray.Origin = worldRayOrigin;
@@ -106,9 +101,9 @@ void closestHit_mirror(inout RayPayload payload, in BuiltInTriangleIntersectionA
 void closestHit_edges(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attribs)
 {
 	//for info
-    float3 barycentrics = float3(1.0 - attribs.barycentrics.x - attribs.barycentrics.y, attribs.barycentrics.x, attribs.barycentrics.y);
-    uint instanceID = InstanceID();
-    uint primitiveID = PrimitiveIndex();
+    //float3 barycentrics = float3(1.0 - attribs.barycentrics.x - attribs.barycentrics.y, attribs.barycentrics.x, attribs.barycentrics.y);
+    //uint instanceID = InstanceID();
+    //uint primitiveID = PrimitiveIndex();
 
-    payload.color *= float3(0, 0, RedChannel) + ShaderTableColor;
+    payload.color *= ShaderTableColor;
 }

@@ -8,10 +8,6 @@ int DX12Setup(HWND wndHandle);
 
 void DX12Free();
 
-void Update();
-
-void Render();
-
 void ComputeLoop();
 
 void DirectLoop();
