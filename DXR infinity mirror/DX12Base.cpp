@@ -148,6 +148,13 @@ namespace Base
 	{
 		ID3D12StateObject* DXRPipelineState;
 	}
+
+	namespace Benchmarking
+	{
+		float avgFrameLength[31];
+		uint32_t RayDepth;
+		bool running;
+	}
 }
 
 void WaitForCompute()
@@ -213,6 +220,10 @@ int DX12Setup(HWND wndHandle)
 	if (CreateShaderResources() != 0) return 1;
 
 	if (CreateShaderTables() != 0) return 1;
+
+	Base::Benchmarking::RayDepth = 1;
+
+	Base::Benchmarking::running = true;
 	
 	return 0;
 }
@@ -682,7 +693,7 @@ void createTopLevelAS(ID3D12GraphicsCommandList4* pCmdList)
 	Base::Resources::DXR::TopBuffers.pInstanceDesc->Map(0, nullptr, (void**)&pInstanceDesc);
 
 	static float rotY = 0;
-	rotY += 0.001f;
+	rotY += PI / (float)FRAMES_FOR_AVERAGE_CALCULATION;
 	for (int i = 0; i < MODEL_PARTS; i++)
 	{
 		pInstanceDesc->InstanceID = i;                            // exposed to the shader via InstanceID()
@@ -692,7 +703,7 @@ void createTopLevelAS(ID3D12GraphicsCommandList4* pCmdList)
 		
 		//apply transform
 		DirectX::XMFLOAT3X4 m;
-		DirectX::XMStoreFloat3x4(&m, DirectX::XMMatrixScaling(0.5f, 0.5f, 0.5f) * DirectX::XMMatrixRotationY(0.25f + rotY) * DirectX::XMMatrixTranslation(0, 0, 0));
+		DirectX::XMStoreFloat3x4(&m, DirectX::XMMatrixScaling(0.5f, 0.5f, 0.5f) * DirectX::XMMatrixRotationY(rotY) * DirectX::XMMatrixTranslation(0, 0, 0));
 		memcpy(pInstanceDesc->Transform, &m, sizeof(pInstanceDesc->Transform));
 
 		pInstanceDesc->AccelerationStructure = Base::Resources::DXR::BottomBuffers[i].pResult->GetGPUVirtualAddress();
@@ -1366,7 +1377,7 @@ void RecordDispatchList(ID3D12CommandAllocator* commandAllocator, ID3D12Graphics
 	commandList->SetComputeRootSignature(Base::Resources::DXR::Dx12GlobalRS);
 
 	// Set parameters in global root signature
-	commandList->SetComputeRoot32BitConstant(0, MAX_RAY_DEPTH, 0);
+	commandList->SetComputeRoot32BitConstant(0, Base::Benchmarking::RayDepth, 0);
 	commandList->SetComputeRoot32BitConstant(0, *(UINT*)((void*)&REFLECTON_BIAS), 1);
 
 	// Dispatch
@@ -1447,12 +1458,35 @@ void DirectLoop()
 {
 	UINT64 copy1FenceValue = 1;
 	UINT64 copy2FenceValue = 1;
+
+	auto timestamp = std::chrono::high_resolution_clock::now();
+	uint32_t framecount = 0;
 	while (true)
 	{
 		if (Base::Synchronization::Dx12Fence[0]->GetCompletedValue() < copy1FenceValue)
 		{
 			Base::Synchronization::Dx12Fence[0]->SetEventOnCompletion(copy1FenceValue, Base::Synchronization::DirectLoop::EventHandle);
 			WaitForSingleObject(Base::Synchronization::DirectLoop::EventHandle, EVENT_TIMEOUT_MILLISECONDS);
+		}
+		if (framecount == FRAMES_FOR_AVERAGE_CALCULATION)
+		{
+			timestamp = std::chrono::high_resolution_clock::now();
+		}
+		if ((framecount >= FRAMES_FOR_AVERAGE_CALCULATION) && (framecount < FRAMES_FOR_AVERAGE_CALCULATION * (31 + 1)))
+		{
+			auto prev = timestamp;
+			timestamp = std::chrono::high_resolution_clock::now();
+			Base::Benchmarking::avgFrameLength[(unsigned int)floorf(framecount / FRAMES_FOR_AVERAGE_CALCULATION) - 1] +=
+				((float)std::chrono::duration_cast<std::chrono::microseconds>(timestamp - prev).count()) / 1000 / FRAMES_FOR_AVERAGE_CALCULATION;
+			if ((framecount != 1000) && (framecount % FRAMES_FOR_AVERAGE_CALCULATION == 0))
+			{
+				Base::Benchmarking::RayDepth +=1;
+			}
+		}
+		framecount++;
+		if (framecount >= FRAMES_FOR_AVERAGE_CALCULATION * (31 + 1))
+		{
+			Base::Benchmarking::running = false;
 		}
 		if (Base::Synchronization::terminate) break;
 
@@ -1479,6 +1513,22 @@ void DirectLoop()
 			Base::Synchronization::Dx12Fence[1]->SetEventOnCompletion(copy2FenceValue, Base::Synchronization::DirectLoop::EventHandle);
 			WaitForSingleObject(Base::Synchronization::DirectLoop::EventHandle, EVENT_TIMEOUT_MILLISECONDS);
 		}
+		if (framecount == FRAMES_FOR_AVERAGE_CALCULATION)
+		{
+			timestamp = std::chrono::high_resolution_clock::now();
+		}
+		if ((framecount >= FRAMES_FOR_AVERAGE_CALCULATION) && (framecount < FRAMES_FOR_AVERAGE_CALCULATION * (31 + 1)))
+		{
+			auto prev = timestamp;
+			timestamp = std::chrono::high_resolution_clock::now();
+			Base::Benchmarking::avgFrameLength[(unsigned int)floorf(framecount / FRAMES_FOR_AVERAGE_CALCULATION) - 1] +=
+				((float)std::chrono::duration_cast<std::chrono::microseconds>(timestamp - prev).count()) / 1000 / FRAMES_FOR_AVERAGE_CALCULATION;
+			if ((framecount != 1000) && (framecount % FRAMES_FOR_AVERAGE_CALCULATION == 0))
+			{
+				Base::Benchmarking::RayDepth += 1;
+			}
+		}
+		framecount++;
 		if (Base::Synchronization::terminate) break;
 
 		RecordPresentList(Base::Queues::Direct::Dx12CommandAllocator[1],
@@ -1503,4 +1553,22 @@ void DirectLoop()
 void TerminateLoops()
 {
 	Base::Synchronization::terminate = true;
+}
+
+bool TestRunning()
+{
+	return Base::Benchmarking::running;
+}
+
+void WriteResults(std::string savePath)
+{
+	std::ofstream myfile;
+	myfile.open(savePath);
+	for (int i = 0; i < 31; i++)
+	{
+		myfile << Base::Benchmarking::avgFrameLength[i];
+		if (i != 30)
+			myfile << ",";
+	}
+	myfile.close();
 }

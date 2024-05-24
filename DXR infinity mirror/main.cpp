@@ -49,6 +49,10 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 					TranslateMessage(&msg);
 					DispatchMessage(&msg);
 				}
+				if (!TestRunning())
+				{
+					break; // don't try this at home kids
+				}
 			}
 
 			TerminateLoops();
@@ -62,6 +66,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 	WaitForDirect();
 
 	DX12Free();
+
+	WriteResults("720p.csv");
 
 #ifdef _DEBUG
 	system("pause");

@@ -1,5 +1,6 @@
 #pragma once
 #include <windows.h>
+#include "GenericIncludes.h"
 
 void WaitForCompute();
 void WaitForDirect();
@@ -13,3 +14,7 @@ void ComputeLoop();
 void DirectLoop();
 
 void TerminateLoops();
+
+bool TestRunning();
+
+void WriteResults(std::string savePath);
