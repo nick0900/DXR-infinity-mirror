@@ -724,7 +724,7 @@ int CreateAccelerationStructures()
 	Base::Queues::Compute::Dx12CommandAllocator[0]->Reset();
 	Base::Queues::Compute::Dx12CommandList4[0]->Reset(Base::Queues::Compute::Dx12CommandAllocator[0], nullptr);
 
-	SceneObject infiniMirror = LoadSceneObjectFile("mirrorTest.fbx");
+	SceneObject infiniMirror = LoadSceneObjectFile(MODEL_FILEPATH);
 	if (infiniMirror.sceneObjectData == Scene_Object_Data_Null)
 	{
 		std::cerr << "Error: Failed loading model test\n";

@@ -1,4 +1,5 @@
 #include <windows.h>
+#include <ShellScalingApi.h>
 
 #include "GenericIncludes.h"
 #include "Settings.h"
@@ -9,6 +10,7 @@
 
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLine, int nCmdShow)
 {
+	SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE);
 #ifdef _DEBUG
 	AllocConsole();
 	FILE* pCin;
