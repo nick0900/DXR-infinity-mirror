@@ -1,4 +1,5 @@
 #include <windows.h>
+#include <ShellScalingApi.h>
 
 #include "GenericIncludes.h"
 #include "Settings.h"
@@ -9,6 +10,7 @@
 
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLine, int nCmdShow)
 {
+	SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE);
 #ifdef _DEBUG
 	AllocConsole();
 	FILE* pCin;
@@ -37,6 +39,9 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 			WaitForDirect();
 
 			ShowWindow(wndHandle, nCmdShow);
+
+			std::thread computeLoop(ComputeLoop);
+			std::thread directLoop(DirectLoop);
 			while (WM_QUIT != msg.message)
 			{
 				if (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE))
@@ -44,12 +49,11 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 					TranslateMessage(&msg);
 					DispatchMessage(&msg);
 				}
-				else
-				{
-					Update();
-					Render();
-				}
 			}
+
+			TerminateLoops();
+			computeLoop.join();
+			directLoop.join();
 		}
 	} while (false);
 

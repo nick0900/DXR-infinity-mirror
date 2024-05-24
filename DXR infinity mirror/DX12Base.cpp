@@ -68,23 +68,39 @@ namespace Base
 		namespace Direct
 		{
 			ID3D12CommandQueue* Dx12Queue;
-			ID3D12CommandAllocator* Dx12CommandAllocator;
-			ID3D12GraphicsCommandList4* Dx12CommandList4;
+			ID3D12CommandAllocator* Dx12CommandAllocator[2];
+			ID3D12GraphicsCommandList4* Dx12CommandList4[2];
 		}
 
 		namespace Compute
 		{
 			ID3D12CommandQueue* Dx12Queue;
-			ID3D12CommandAllocator* Dx12CommandAllocator;
-			ID3D12GraphicsCommandList4* Dx12CommandList4;
+			ID3D12CommandAllocator* Dx12CommandAllocator[2];
+			ID3D12GraphicsCommandList4* Dx12CommandList4[2];
 		}
 	}
 
 	namespace Synchronization
 	{
-		ID3D12Fence1* Dx12Fence;
-		UINT64 Dx12FenceValue;
-		HANDLE Dx12FenceEvent;
+		ID3D12Fence1* Dx12Fence[2];
+		bool terminate = false;
+
+		namespace ComputeLoop
+		{
+			HANDLE EventHandle;
+		}
+
+		namespace DirectLoop
+		{
+			HANDLE EventHandle;
+		}
+
+		namespace WaitFunction
+		{
+			ID3D12Fence1* Dx12Fence;
+			UINT64 FenceValue;
+			HANDLE EventHandle;
+		}
 	}
 	
 	
@@ -106,14 +122,14 @@ namespace Base
 
 			ID3D12RootSignature* Dx12GlobalRS;
 
-			ID3D12DescriptorHeap* Dx12RTDescriptorHeap;
-			ID3D12Resource1* Dx12OutputResource;
-			D3D12_CPU_DESCRIPTOR_HANDLE Dx12OutputUAV_CPUHandle;
+			ID3D12DescriptorHeap* Dx12RTDescriptorHeap[2];
+			ID3D12Resource1* Dx12OutputResource[2];
+			D3D12_CPU_DESCRIPTOR_HANDLE Dx12OutputUAV_CPUHandle[2];
 			D3D12_CPU_DESCRIPTOR_HANDLE Dx12Accelleration_CPUHandle;
 
 			namespace Shaders
 			{
-				ShaderTableData RayGenShaderTable{};
+				ShaderTableData RayGenShaderTable[2]{ {}, {} };
 				ShaderTableData MissShaderTable{};
 				ShaderTableData HitGroupShaderTable{};
 			}
@@ -136,39 +152,31 @@ namespace Base
 
 void WaitForCompute()
 {
-	//WAITING FOR EACH FRAME TO COMPLETE BEFORE CONTINUING IS NOT BEST PRACTICE.
-	//This is code implemented as such for simplicity. The cpu could for example be used
-	//for other tasks to prepare the next frame while the current one is being rendered.
-
 	//Signal and increment the fence value.
-	const UINT64 fence = Base::Synchronization::Dx12FenceValue;
-	Base::Queues::Compute::Dx12Queue->Signal(Base::Synchronization::Dx12Fence, fence);
-	Base::Synchronization::Dx12FenceValue++;
+	const UINT64 fence = Base::Synchronization::WaitFunction::FenceValue;
+	Base::Queues::Compute::Dx12Queue->Signal(Base::Synchronization::WaitFunction::Dx12Fence, fence);
+	Base::Synchronization::WaitFunction::FenceValue++;
 
 	//Wait until command queue is done.
-	if (Base::Synchronization::Dx12Fence->GetCompletedValue() < fence)
+	if (Base::Synchronization::WaitFunction::Dx12Fence->GetCompletedValue() < fence)
 	{
-		Base::Synchronization::Dx12Fence->SetEventOnCompletion(fence, Base::Synchronization::Dx12FenceEvent);
-		WaitForSingleObject(Base::Synchronization::Dx12FenceEvent, INFINITE);
+		Base::Synchronization::WaitFunction::Dx12Fence->SetEventOnCompletion(fence, Base::Synchronization::WaitFunction::EventHandle);
+		WaitForSingleObject(Base::Synchronization::WaitFunction::EventHandle, INFINITE);
 	}
 }
 
 void WaitForDirect()
 {
-	//WAITING FOR EACH FRAME TO COMPLETE BEFORE CONTINUING IS NOT BEST PRACTICE.
-	//This is code implemented as such for simplicity. The cpu could for example be used
-	//for other tasks to prepare the next frame while the current one is being rendered.
-
 	//Signal and increment the fence value.
-	const UINT64 fence = Base::Synchronization::Dx12FenceValue;
-	Base::Queues::Direct::Dx12Queue->Signal(Base::Synchronization::Dx12Fence, fence);
-	Base::Synchronization::Dx12FenceValue++;
+	const UINT64 fence = Base::Synchronization::WaitFunction::FenceValue;
+	Base::Queues::Direct::Dx12Queue->Signal(Base::Synchronization::WaitFunction::Dx12Fence, fence);
+	Base::Synchronization::WaitFunction::FenceValue++;
 
 	//Wait until command queue is done.
-	if (Base::Synchronization::Dx12Fence->GetCompletedValue() < fence)
+	if (Base::Synchronization::WaitFunction::Dx12Fence->GetCompletedValue() < fence)
 	{
-		Base::Synchronization::Dx12Fence->SetEventOnCompletion(fence, Base::Synchronization::Dx12FenceEvent);
-		WaitForSingleObject(Base::Synchronization::Dx12FenceEvent, INFINITE);
+		Base::Synchronization::WaitFunction::Dx12Fence->SetEventOnCompletion(fence, Base::Synchronization::WaitFunction::EventHandle);
+		WaitForSingleObject(Base::Synchronization::WaitFunction::EventHandle, INFINITE);
 	}
 }
 
@@ -204,7 +212,6 @@ int DX12Setup(HWND wndHandle)
 
 	if (CreateShaderResources() != 0) return 1;
 
-	//last
 	if (CreateShaderTables() != 0) return 1;
 	
 	return 0;
@@ -212,8 +219,10 @@ int DX12Setup(HWND wndHandle)
 
 void DX12Free()
 {
-	SafeRelease(&Base::Resources::DXR::Dx12OutputResource);
-	SafeRelease(&Base::Resources::DXR::Dx12RTDescriptorHeap);
+	SafeRelease(&Base::Resources::DXR::Dx12OutputResource[0]);
+	SafeRelease(&Base::Resources::DXR::Dx12RTDescriptorHeap[0]);
+	SafeRelease(&Base::Resources::DXR::Dx12OutputResource[1]);
+	SafeRelease(&Base::Resources::DXR::Dx12RTDescriptorHeap[1]);
 	SafeRelease(&Base::States::DXRPipelineState);
 	SafeRelease(&Base::Resources::DXR::Dx12GlobalRS);
 
@@ -230,15 +239,23 @@ void DX12Free()
 		SafeRelease(Base::Resources::Geometry::Dx12IBResources[i]);
 	}
 	
-	CloseHandle(Base::Synchronization::Dx12FenceEvent);
-	SafeRelease(&Base::Synchronization::Dx12Fence);
+	CloseHandle(Base::Synchronization::ComputeLoop::EventHandle);
+	CloseHandle(Base::Synchronization::DirectLoop::EventHandle);
+	SafeRelease(&Base::Synchronization::Dx12Fence[0]);
+	SafeRelease(&Base::Synchronization::Dx12Fence[1]);
+	CloseHandle(Base::Synchronization::WaitFunction::EventHandle);
+	SafeRelease(&Base::Synchronization::WaitFunction::Dx12Fence);
 
 	SafeRelease(&Base::DxgiSwapChain4);
 
-	SafeRelease(&Base::Queues::Compute::Dx12CommandList4);
-	SafeRelease(&Base::Queues::Compute::Dx12CommandAllocator);
-	SafeRelease(&Base::Queues::Direct::Dx12CommandList4);
-	SafeRelease(&Base::Queues::Direct::Dx12CommandAllocator);
+	SafeRelease(&Base::Queues::Compute::Dx12CommandList4[0]);
+	SafeRelease(&Base::Queues::Compute::Dx12CommandAllocator[0]);
+	SafeRelease(&Base::Queues::Direct::Dx12CommandList4[0]);
+	SafeRelease(&Base::Queues::Direct::Dx12CommandAllocator[0]);
+	SafeRelease(&Base::Queues::Compute::Dx12CommandList4[1]);
+	SafeRelease(&Base::Queues::Compute::Dx12CommandAllocator[1]);
+	SafeRelease(&Base::Queues::Direct::Dx12CommandList4[1]);
+	SafeRelease(&Base::Queues::Direct::Dx12CommandAllocator[1]);
 	SafeRelease(&Base::Queues::Compute::Dx12Queue);
 	SafeRelease(&Base::Queues::Direct::Dx12Queue);
 
@@ -341,33 +358,53 @@ int CreateCommandInterfaces()
 
 		//Create command allocator. The command allocator object corresponds
 		//to the underlying allocations in which GPU commands are stored.
-		if (FAILED(Base::Dx12Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&Base::Queues::Direct::Dx12CommandAllocator)))) break;
-		NameInterface(Base::Queues::Direct::Dx12CommandAllocator);
+		if (FAILED(Base::Dx12Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&Base::Queues::Direct::Dx12CommandAllocator[0])))) break;
+		NameInterface(Base::Queues::Direct::Dx12CommandAllocator[0]);
+		if (FAILED(Base::Dx12Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&Base::Queues::Direct::Dx12CommandAllocator[1])))) break;
+		NameInterface(Base::Queues::Direct::Dx12CommandAllocator[1]);
 
-		if (FAILED(Base::Dx12Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS(&Base::Queues::Compute::Dx12CommandAllocator)))) break;
-		NameInterface(Base::Queues::Compute::Dx12CommandAllocator);
+		if (FAILED(Base::Dx12Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS(&Base::Queues::Compute::Dx12CommandAllocator[0])))) break;
+		NameInterface(Base::Queues::Compute::Dx12CommandAllocator[0]);
+		if (FAILED(Base::Dx12Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS(&Base::Queues::Compute::Dx12CommandAllocator[1])))) break;
+		NameInterface(Base::Queues::Compute::Dx12CommandAllocator[1]);
 
 		//Create command list.
 		if (FAILED(Base::Dx12Device->CreateCommandList(
 			0,
 			D3D12_COMMAND_LIST_TYPE_DIRECT,
-			Base::Queues::Direct::Dx12CommandAllocator,
+			Base::Queues::Direct::Dx12CommandAllocator[0],
 			nullptr,
-			IID_PPV_ARGS(&Base::Queues::Direct::Dx12CommandList4)))) break;
-		NameInterface(Base::Queues::Direct::Dx12CommandList4);
+			IID_PPV_ARGS(&Base::Queues::Direct::Dx12CommandList4[0])))) break;
+		NameInterface(Base::Queues::Direct::Dx12CommandList4[0]);
+		if (FAILED(Base::Dx12Device->CreateCommandList(
+			0,
+			D3D12_COMMAND_LIST_TYPE_DIRECT,
+			Base::Queues::Direct::Dx12CommandAllocator[1],
+			nullptr,
+			IID_PPV_ARGS(&Base::Queues::Direct::Dx12CommandList4[1])))) break;
+		NameInterface(Base::Queues::Direct::Dx12CommandList4[1]);
 
 		if (FAILED(Base::Dx12Device->CreateCommandList(
 			0,
 			D3D12_COMMAND_LIST_TYPE_COMPUTE,
-			Base::Queues::Compute::Dx12CommandAllocator,
+			Base::Queues::Compute::Dx12CommandAllocator[0],
 			nullptr,
-			IID_PPV_ARGS(&Base::Queues::Compute::Dx12CommandList4)))) break;
-		NameInterface(Base::Queues::Compute::Dx12CommandList4);
+			IID_PPV_ARGS(&Base::Queues::Compute::Dx12CommandList4[0])))) break;
+		NameInterface(Base::Queues::Compute::Dx12CommandList4[0]);
+		if (FAILED(Base::Dx12Device->CreateCommandList(
+			0,
+			D3D12_COMMAND_LIST_TYPE_COMPUTE,
+			Base::Queues::Compute::Dx12CommandAllocator[1],
+			nullptr,
+			IID_PPV_ARGS(&Base::Queues::Compute::Dx12CommandList4[1])))) break;
+		NameInterface(Base::Queues::Compute::Dx12CommandList4[1]);
 
 		//Command lists are created in the recording state. Since there is nothing to
 		//record right now and the main loop expects it to be closed, we close it.
-		Base::Queues::Direct::Dx12CommandList4->Close();
-		Base::Queues::Compute::Dx12CommandList4->Close();
+		Base::Queues::Direct::Dx12CommandList4[0]->Close();
+		Base::Queues::Direct::Dx12CommandList4[1]->Close();
+		Base::Queues::Compute::Dx12CommandList4[0]->Close();
+		Base::Queues::Compute::Dx12CommandList4[1]->Close();
 
 		std::cout << "Command Queues setup successful\n";
 		return 0;
@@ -396,7 +433,7 @@ int CreateSwapChain(HWND wndHandle)
 	scDesc.BufferCount = NUM_SWAP_BUFFERS;
 	scDesc.Scaling = DXGI_SCALING_NONE;
 	scDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-	scDesc.Flags = 0;
+	scDesc.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
 	scDesc.AlphaMode = DXGI_ALPHA_MODE_UNSPECIFIED;
 
 	IDXGISwapChain1* swapChain1 = nullptr;
@@ -433,15 +470,31 @@ int CreateSwapChain(HWND wndHandle)
 
 int CreateFenceAndEventHandle()
 {
-	if (FAILED(Base::Dx12Device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&Base::Synchronization::Dx12Fence))))
+	if (FAILED(Base::Dx12Device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&Base::Synchronization::Dx12Fence[0]))))
 	{
-		std::cerr << "Error: Fence creation failed\n";
+		std::cerr << "Error: Main fence creation failed\n";
 		return 1;
 	}
-	NameInterface(Base::Synchronization::Dx12Fence);
-	Base::Synchronization::Dx12FenceValue = 1;
-	//Create an event handle to use for GPU synchronization.
-	Base::Synchronization::Dx12FenceEvent = CreateEvent(0, false, false, 0);
+	if (FAILED(Base::Dx12Device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&Base::Synchronization::Dx12Fence[1]))))
+	{
+		std::cerr << "Error: Main fence creation failed\n";
+		return 1;
+	}
+	NameInterfaceIndex(Base::Synchronization::Dx12Fence[0], 0);
+	NameInterfaceIndex(Base::Synchronization::Dx12Fence[1], 1);
+
+	//Create event handles to use for GPU synchronization.
+	Base::Synchronization::ComputeLoop::EventHandle = CreateEvent(0, false, false, 0);
+	Base::Synchronization::DirectLoop::EventHandle = CreateEvent(0, false, false, 0);
+
+	if (FAILED(Base::Dx12Device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&Base::Synchronization::WaitFunction::Dx12Fence))))
+	{
+		std::cerr << "Error: Wait fence creation failed\n";
+		return 1;
+	}
+	NameInterface(Base::Synchronization::WaitFunction::Dx12Fence);
+	Base::Synchronization::WaitFunction::FenceValue = 0;
+	Base::Synchronization::WaitFunction::EventHandle = CreateEvent(0, false, false, 0);
 
 	std::cout << "Fence setup successful\n";
 	return 0;
@@ -633,7 +686,7 @@ void createTopLevelAS(ID3D12GraphicsCommandList4* pCmdList)
 	for (int i = 0; i < MODEL_PARTS; i++)
 	{
 		pInstanceDesc->InstanceID = i;                            // exposed to the shader via InstanceID()
-		pInstanceDesc->InstanceContributionToHitGroupIndex = i;   // offset inside the shader-table. we only have a single geometry, so the offset 0
+		pInstanceDesc->InstanceContributionToHitGroupIndex = i;   // offset inside the shader-table.
 		pInstanceDesc->Flags = D3D12_RAYTRACING_INSTANCE_FLAG_NONE;
 
 		
@@ -668,10 +721,10 @@ void createTopLevelAS(ID3D12GraphicsCommandList4* pCmdList)
 
 int CreateAccelerationStructures()
 {
-	Base::Queues::Compute::Dx12CommandAllocator->Reset();
-	Base::Queues::Compute::Dx12CommandList4->Reset(Base::Queues::Compute::Dx12CommandAllocator, nullptr);
+	Base::Queues::Compute::Dx12CommandAllocator[0]->Reset();
+	Base::Queues::Compute::Dx12CommandList4[0]->Reset(Base::Queues::Compute::Dx12CommandAllocator[0], nullptr);
 
-	SceneObject infiniMirror = LoadSceneObjectFile("mirrorTest.fbx");
+	SceneObject infiniMirror = LoadSceneObjectFile(MODEL_FILEPATH);
 	if (infiniMirror.sceneObjectData == Scene_Object_Data_Null)
 	{
 		std::cerr << "Error: Failed loading model test\n";
@@ -688,12 +741,12 @@ int CreateAccelerationStructures()
 	SetupGeometryDesc(&geomDesc[0], Base::Resources::Geometry::Dx12VBResources[0], infiniMirror.meshGeometries[0].numVertecies, Base::Resources::Geometry::Dx12IBResources[0], infiniMirror.meshGeometries[0].numIndecies);
 	SetupGeometryDesc(&geomDesc[1], Base::Resources::Geometry::Dx12VBResources[1], infiniMirror.meshGeometries[1].numVertecies, Base::Resources::Geometry::Dx12IBResources[1], infiniMirror.meshGeometries[1].numIndecies);
 
-	createBottomLevelAS(Base::Queues::Compute::Dx12CommandList4, geomDesc, 1, &Base::Resources::DXR::BottomBuffers[0]);
-	createBottomLevelAS(Base::Queues::Compute::Dx12CommandList4, geomDesc + 1, 1, &Base::Resources::DXR::BottomBuffers[1]);
-	createTopLevelAS(Base::Queues::Compute::Dx12CommandList4);
+	createBottomLevelAS(Base::Queues::Compute::Dx12CommandList4[0], geomDesc, 1, &Base::Resources::DXR::BottomBuffers[0]);
+	createBottomLevelAS(Base::Queues::Compute::Dx12CommandList4[0], geomDesc + 1, 1, &Base::Resources::DXR::BottomBuffers[1]);
+	createTopLevelAS(Base::Queues::Compute::Dx12CommandList4[0]);
 
-	Base::Queues::Compute::Dx12CommandList4->Close();
-	ID3D12CommandList* listsToExec[] = { Base::Queues::Compute::Dx12CommandList4 };
+	Base::Queues::Compute::Dx12CommandList4[0]->Close();
+	ID3D12CommandList* listsToExec[] = { Base::Queues::Compute::Dx12CommandList4[0]};
 	Base::Queues::Compute::Dx12Queue->ExecuteCommandLists(_countof(listsToExec), listsToExec);
 
 	Base::Resources::Geometry::numVertecies[0] = infiniMirror.meshGeometries[0].numVertecies;
@@ -754,25 +807,11 @@ ID3D12RootSignature* createRayGenLocalRootSignature()
 
 ID3D12RootSignature* createMirrorHitGroupLocalRootSignature()
 {
-	D3D12_DESCRIPTOR_RANGE range[2]{};
 	D3D12_ROOT_PARAMETER rootParams[3]{};
 
-	range[0].BaseShaderRegister = 0;
-	range[0].NumDescriptors = 1;
-	range[0].RegisterSpace = 0;
-	range[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
-	range[0].OffsetInDescriptorsFromTableStart = 0;
-
-	// gRtScene
-	range[1].BaseShaderRegister = 0;
-	range[1].NumDescriptors = 1;
-	range[1].RegisterSpace = 0;
-	range[1].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-	range[1].OffsetInDescriptorsFromTableStart = 1;
-
-	rootParams[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-	rootParams[0].DescriptorTable.NumDescriptorRanges = _countof(range);
-	rootParams[0].DescriptorTable.pDescriptorRanges = range;
+	rootParams[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
+	rootParams[0].Descriptor.RegisterSpace = 0;
+	rootParams[0].Descriptor.ShaderRegister = 0;
 
 	rootParams[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
 	rootParams[1].Descriptor.RegisterSpace = 0;
@@ -1093,9 +1132,13 @@ int CreateShaderResources()
 	heapDescriptorDesc.NumDescriptors = 10;
 	heapDescriptorDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 	heapDescriptorDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-	Base::Dx12Device->CreateDescriptorHeap(&heapDescriptorDesc, IID_PPV_ARGS(&Base::Resources::DXR::Dx12RTDescriptorHeap));
+
+	//Need two for setting up the two different raygen tables
+	Base::Dx12Device->CreateDescriptorHeap(&heapDescriptorDesc, IID_PPV_ARGS(&Base::Resources::DXR::Dx12RTDescriptorHeap[0]));
+	Base::Dx12Device->CreateDescriptorHeap(&heapDescriptorDesc, IID_PPV_ARGS(&Base::Resources::DXR::Dx12RTDescriptorHeap[1]));
 
 	// Create the output resource. The dimensions and format should match the swap-chain
+	// Requires two resources for concurrent dispatch of rays and copying previous output to the backbuffer
 	D3D12_RESOURCE_DESC resDesc = {};
 	resDesc.DepthOrArraySize = 1;
 	resDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
@@ -1106,14 +1149,19 @@ int CreateShaderResources()
 	resDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
 	resDesc.MipLevels = 1;
 	resDesc.SampleDesc.Count = 1;
-	Base::Dx12Device->CreateCommittedResource(&defaultHeapProps, D3D12_HEAP_FLAG_NONE, &resDesc, D3D12_RESOURCE_STATE_COPY_SOURCE, nullptr, IID_PPV_ARGS(&Base::Resources::DXR::Dx12OutputResource)); // Starting as copy-source to simplify onFrameRender()
+	//both resources start in unordered access state for integration with the start of the rendering loops
+	Base::Dx12Device->CreateCommittedResource(&defaultHeapProps, D3D12_HEAP_FLAG_NONE, &resDesc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&Base::Resources::DXR::Dx12OutputResource[0]));
+	Base::Dx12Device->CreateCommittedResource(&defaultHeapProps, D3D12_HEAP_FLAG_NONE, &resDesc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&Base::Resources::DXR::Dx12OutputResource[1]));
 
 	// Create the UAV. Based on the root signature we created it should be the first entry
 	D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
 	uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
 
-	Base::Resources::DXR::Dx12OutputUAV_CPUHandle = Base::Resources::DXR::Dx12RTDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
-	Base::Dx12Device->CreateUnorderedAccessView(Base::Resources::DXR::Dx12OutputResource, nullptr, &uavDesc, Base::Resources::DXR::Dx12OutputUAV_CPUHandle);
+	// each UAV resource is bound to a respective descriptorheap
+	Base::Resources::DXR::Dx12OutputUAV_CPUHandle[0] = Base::Resources::DXR::Dx12RTDescriptorHeap[0]->GetCPUDescriptorHandleForHeapStart();
+	Base::Dx12Device->CreateUnorderedAccessView(Base::Resources::DXR::Dx12OutputResource[0], nullptr, &uavDesc, Base::Resources::DXR::Dx12OutputUAV_CPUHandle[0]);
+	Base::Resources::DXR::Dx12OutputUAV_CPUHandle[1] = Base::Resources::DXR::Dx12RTDescriptorHeap[1]->GetCPUDescriptorHandleForHeapStart();
+	Base::Dx12Device->CreateUnorderedAccessView(Base::Resources::DXR::Dx12OutputResource[1], nullptr, &uavDesc, Base::Resources::DXR::Dx12OutputUAV_CPUHandle[1]);
 
 	// Create the TLAS SRV right after the UAV. Note that we are using a different SRV desc here
 	D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
@@ -1121,7 +1169,11 @@ int CreateShaderResources()
 	srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
 	srvDesc.RaytracingAccelerationStructure.Location = Base::Resources::DXR::TopBuffers.pResult->GetGPUVirtualAddress();
 
-	Base::Resources::DXR::Dx12Accelleration_CPUHandle = Base::Resources::DXR::Dx12RTDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
+	// TLAS need to be placed in both descriptor heaps
+	Base::Resources::DXR::Dx12Accelleration_CPUHandle = Base::Resources::DXR::Dx12RTDescriptorHeap[0]->GetCPUDescriptorHandleForHeapStart();
+	Base::Resources::DXR::Dx12Accelleration_CPUHandle.ptr += Base::Dx12Device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+	Base::Dx12Device->CreateShaderResourceView(nullptr, &srvDesc, Base::Resources::DXR::Dx12Accelleration_CPUHandle);
+	Base::Resources::DXR::Dx12Accelleration_CPUHandle = Base::Resources::DXR::Dx12RTDescriptorHeap[1]->GetCPUDescriptorHandleForHeapStart();
 	Base::Resources::DXR::Dx12Accelleration_CPUHandle.ptr += Base::Dx12Device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 	Base::Dx12Device->CreateShaderResourceView(nullptr, &srvDesc, Base::Resources::DXR::Dx12Accelleration_CPUHandle);
 
@@ -1144,24 +1196,44 @@ int CreateShaderTables()
 				UINT64 RTVDescriptor;
 			} tableData;
 
-			memcpy(tableData.ShaderIdentifier, pRtsoProps->GetShaderIdentifier(sRayGen), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
-			tableData.RTVDescriptor = Base::Resources::DXR::Dx12RTDescriptorHeap->GetGPUDescriptorHandleForHeapStart().ptr;
-
 			//how big is the biggest?
 			union MaxSize
 			{
 				RAY_GEN_SHADER_TABLE_DATA data0;
 			};
 
-			Base::Resources::DXR::Shaders::RayGenShaderTable.StrideInBytes = sizeof(MaxSize);
-			Base::Resources::DXR::Shaders::RayGenShaderTable.SizeInBytes = Base::Resources::DXR::Shaders::RayGenShaderTable.StrideInBytes * 1; //<-- only one for now...
-			Base::Resources::DXR::Shaders::RayGenShaderTable.Resource = createBuffer(Base::Resources::DXR::Shaders::RayGenShaderTable.SizeInBytes, D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_GENERIC_READ, uploadHeapProperties);
+			//create table for the first UAV output
+			memcpy(tableData.ShaderIdentifier, pRtsoProps->GetShaderIdentifier(sRayGen), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+			tableData.RTVDescriptor = Base::Resources::DXR::Dx12RTDescriptorHeap[0]->GetGPUDescriptorHandleForHeapStart().ptr;
 
-			// Map the buffer
-			void* pData;
-			Base::Resources::DXR::Shaders::RayGenShaderTable.Resource->Map(0, nullptr, &pData);
-			memcpy(pData, &tableData, sizeof(tableData));
-			Base::Resources::DXR::Shaders::RayGenShaderTable.Resource->Unmap(0, nullptr);
+			Base::Resources::DXR::Shaders::RayGenShaderTable[0].StrideInBytes = sizeof(MaxSize);
+			Base::Resources::DXR::Shaders::RayGenShaderTable[0].SizeInBytes = Base::Resources::DXR::Shaders::RayGenShaderTable[0].StrideInBytes * 1; //<-- only one for now...
+			Base::Resources::DXR::Shaders::RayGenShaderTable[0].Resource = createBuffer(Base::Resources::DXR::Shaders::RayGenShaderTable[0].SizeInBytes, D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_GENERIC_READ, uploadHeapProperties);
+
+			{
+				// Map the buffer
+				void* pData;
+				Base::Resources::DXR::Shaders::RayGenShaderTable[0].Resource->Map(0, nullptr, &pData);
+				memcpy(pData, &tableData, sizeof(tableData));
+				Base::Resources::DXR::Shaders::RayGenShaderTable[0].Resource->Unmap(0, nullptr);
+			}
+
+
+			//create table for the second UAV output
+			memcpy(tableData.ShaderIdentifier, pRtsoProps->GetShaderIdentifier(sRayGen), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+			tableData.RTVDescriptor = Base::Resources::DXR::Dx12RTDescriptorHeap[1]->GetGPUDescriptorHandleForHeapStart().ptr;
+
+			Base::Resources::DXR::Shaders::RayGenShaderTable[1].StrideInBytes = sizeof(MaxSize);
+			Base::Resources::DXR::Shaders::RayGenShaderTable[1].SizeInBytes = Base::Resources::DXR::Shaders::RayGenShaderTable[1].StrideInBytes * 1; //<-- only one for now...
+			Base::Resources::DXR::Shaders::RayGenShaderTable[1].Resource = createBuffer(Base::Resources::DXR::Shaders::RayGenShaderTable[1].SizeInBytes, D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_GENERIC_READ, uploadHeapProperties);
+
+			{
+				// Map the buffer
+				void* pData;
+				Base::Resources::DXR::Shaders::RayGenShaderTable[1].Resource->Map(0, nullptr, &pData);
+				memcpy(pData, &tableData, sizeof(tableData));
+				Base::Resources::DXR::Shaders::RayGenShaderTable[1].Resource->Unmap(0, nullptr);
+			}
 		}
 
 		//miss
@@ -1209,7 +1281,7 @@ int CreateShaderTables()
 			} edgesTableData{};
 
 			memcpy(mirrorTableData.ShaderIdentifier, pRtsoProps->GetShaderIdentifier(sHitGroupMirror), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
-			mirrorTableData.RTVDescriptor = Base::Resources::DXR::Dx12RTDescriptorHeap->GetGPUDescriptorHandleForHeapStart().ptr;
+			mirrorTableData.RTVDescriptor = Base::Resources::DXR::TopBuffers.pResult->GetGPUVirtualAddress();
 			mirrorTableData.vertDescriptor = Base::Resources::Geometry::Dx12VBResources[0]->GetGPUVirtualAddress();
 			mirrorTableData.indDescriptor = Base::Resources::Geometry::Dx12IBResources[0]->GetGPUVirtualAddress();
 
@@ -1245,6 +1317,7 @@ int CreateShaderTables()
 	return 0;
 }
 
+
 void SetResourceTransitionBarrier(ID3D12GraphicsCommandList* commandList, ID3D12Resource* resource,
 	D3D12_RESOURCE_STATES StateBefore, D3D12_RESOURCE_STATES StateAfter)
 {
@@ -1259,38 +1332,28 @@ void SetResourceTransitionBarrier(ID3D12GraphicsCommandList* commandList, ID3D12
 	commandList->ResourceBarrier(1, &barrierDesc);
 }
 
-
-void Update()
+void RecordDispatchList(ID3D12CommandAllocator* commandAllocator, ID3D12GraphicsCommandList4* commandList, ID3D12DescriptorHeap* constantBufferDescriptorHeap, ShaderTableData* raygenTable)
 {
-
-}
-
-void Render()
-{
-	UINT backBufferIndex = Base::DxgiSwapChain4->GetCurrentBackBufferIndex();
-
-	//Command list allocators can only be reset when the associated command lists have
-	//finished execution on the GPU; fences are used to ensure this (See WaitForGpu method)
-	Base::Queues::Compute::Dx12CommandAllocator->Reset();
-	Base::Queues::Compute::Dx12CommandList4->Reset(Base::Queues::Compute::Dx12CommandAllocator, nullptr);
+	commandAllocator->Reset();
+	commandList->Reset(commandAllocator, nullptr);
 
 	//Set constant buffer descriptor heap
-	ID3D12DescriptorHeap* descriptorHeaps[] = { Base::Resources::DXR::Dx12RTDescriptorHeap };
-	Base::Queues::Compute::Dx12CommandList4->SetDescriptorHeaps(ARRAYSIZE(descriptorHeaps), descriptorHeaps);
+	ID3D12DescriptorHeap* descriptorHeaps[] = { constantBufferDescriptorHeap };
+	commandList->SetDescriptorHeaps(ARRAYSIZE(descriptorHeaps), descriptorHeaps);
 
 	//hack to update every frame...
-	createTopLevelAS(Base::Queues::Compute::Dx12CommandList4);
+	createTopLevelAS(commandList);
 
 	// Let's raytrace
-	SetResourceTransitionBarrier(Base::Queues::Compute::Dx12CommandList4, Base::Resources::DXR::Dx12OutputResource, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+	
 	D3D12_DISPATCH_RAYS_DESC raytraceDesc = {};
 	raytraceDesc.Width = SCREEN_WIDTH;
 	raytraceDesc.Height = SCREEN_HEIGHT;
 	raytraceDesc.Depth = 1;
 
 	//set shader tables
-	raytraceDesc.RayGenerationShaderRecord.StartAddress = Base::Resources::DXR::Shaders::RayGenShaderTable.Resource->GetGPUVirtualAddress();
-	raytraceDesc.RayGenerationShaderRecord.SizeInBytes = Base::Resources::DXR::Shaders::RayGenShaderTable.SizeInBytes;
+	raytraceDesc.RayGenerationShaderRecord.StartAddress = raygenTable->Resource->GetGPUVirtualAddress();
+	raytraceDesc.RayGenerationShaderRecord.SizeInBytes = raygenTable->SizeInBytes;
 
 	raytraceDesc.MissShaderTable.StartAddress = Base::Resources::DXR::Shaders::MissShaderTable.Resource->GetGPUVirtualAddress();
 	raytraceDesc.MissShaderTable.StrideInBytes = Base::Resources::DXR::Shaders::MissShaderTable.StrideInBytes;
@@ -1301,53 +1364,145 @@ void Render()
 	raytraceDesc.HitGroupTable.SizeInBytes = Base::Resources::DXR::Shaders::HitGroupShaderTable.SizeInBytes;
 
 	// Bind the empty root signature
-	Base::Queues::Compute::Dx12CommandList4->SetComputeRootSignature(Base::Resources::DXR::Dx12GlobalRS);
+	commandList->SetComputeRootSignature(Base::Resources::DXR::Dx12GlobalRS);
 
 	// Set parameters in global root signature
 	float redColor = 1.0f;
-	Base::Queues::Compute::Dx12CommandList4->SetComputeRoot32BitConstant(0, *reinterpret_cast<UINT*>(&redColor), 0);
-	Base::Queues::Compute::Dx12CommandList4->SetComputeRoot32BitConstant(0, MAX_RAY_DEPTH, 1);
+	commandList->SetComputeRoot32BitConstant(0, *reinterpret_cast<UINT*>(&redColor), 0);
+	commandList->SetComputeRoot32BitConstant(0, MAX_RAY_DEPTH, 1);
 
 	// Dispatch
-	Base::Queues::Compute::Dx12CommandList4->SetPipelineState1(Base::States::DXRPipelineState);
-	Base::Queues::Compute::Dx12CommandList4->DispatchRays(&raytraceDesc);
+	commandList->SetPipelineState1(Base::States::DXRPipelineState);
+	commandList->DispatchRays(&raytraceDesc);
 
 	//Close the list to prepare it for execution.
-	Base::Queues::Compute::Dx12CommandList4->Close();
+	commandList->Close();
+}
 
-	WaitForDirect(); //Wait for GPU to finish.
-	//NOT BEST PRACTICE, only used as such for simplicity.
-	{
-		//Execute the command list.
-		ID3D12CommandList* listsToExecute[] = { Base::Queues::Compute::Dx12CommandList4 };
-		Base::Queues::Compute::Dx12Queue->ExecuteCommandLists(ARRAYSIZE(listsToExecute), listsToExecute);
-	}
-
-
-	Base::Queues::Direct::Dx12CommandAllocator->Reset();
-	Base::Queues::Direct::Dx12CommandList4->Reset(Base::Queues::Direct::Dx12CommandAllocator, nullptr);
+void RecordPresentList(ID3D12CommandAllocator* commandAllocator, ID3D12GraphicsCommandList4* commandList, UINT backBufferIndex, ID3D12Resource1* outputResource)
+{
+	commandAllocator->Reset();
+	commandList->Reset(commandAllocator, nullptr);
 
 	// Copy the results to the back-buffer
-	SetResourceTransitionBarrier(Base::Queues::Direct::Dx12CommandList4, Base::Resources::DXR::Dx12OutputResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE);
-	SetResourceTransitionBarrier(Base::Queues::Direct::Dx12CommandList4, Base::Resources::Backbuffers::Dx12RTVResources[backBufferIndex], D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_COPY_DEST);
-	Base::Queues::Direct::Dx12CommandList4->CopyResource(Base::Resources::Backbuffers::Dx12RTVResources[backBufferIndex], Base::Resources::DXR::Dx12OutputResource);
+	SetResourceTransitionBarrier(commandList, outputResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE);
+	SetResourceTransitionBarrier(commandList, Base::Resources::Backbuffers::Dx12RTVResources[backBufferIndex], D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_COPY_DEST);
+	commandList->CopyResource(Base::Resources::Backbuffers::Dx12RTVResources[backBufferIndex], outputResource);
 
 
-	//Indicate that the back buffer will now be used to present.
-	SetResourceTransitionBarrier(Base::Queues::Direct::Dx12CommandList4, Base::Resources::Backbuffers::Dx12RTVResources[backBufferIndex], D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PRESENT);
+	//Indicate that the back buffer will now be used to present and ray output be used as UAV.
+	SetResourceTransitionBarrier(commandList, Base::Resources::Backbuffers::Dx12RTVResources[backBufferIndex], D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PRESENT);
+	SetResourceTransitionBarrier(commandList, outputResource, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
 	//Close the list to prepare it for execution.
-	Base::Queues::Direct::Dx12CommandList4->Close();
+	commandList->Close();
+}
 
-	WaitForCompute();
 
+void ComputeLoop()
+{
+	UINT64 dispatch1FenceValue = 0;
+	UINT64 dispatch2FenceValue = 0;
+	while (true)
 	{
-		//Execute the command list.
-		ID3D12CommandList* listsToExecute[] = { Base::Queues::Direct::Dx12CommandList4 };
-		Base::Queues::Direct::Dx12Queue->ExecuteCommandLists(ARRAYSIZE(listsToExecute), listsToExecute);
-	}
+		if (Base::Synchronization::Dx12Fence[0]->GetCompletedValue() < dispatch1FenceValue)
+		{
+			Base::Synchronization::Dx12Fence[0]->SetEventOnCompletion(dispatch1FenceValue, Base::Synchronization::ComputeLoop::EventHandle);
+			WaitForSingleObject(Base::Synchronization::ComputeLoop::EventHandle, EVENT_TIMEOUT_MILLISECONDS);
+		}
+		if (Base::Synchronization::terminate) break;
 
-	//Present the frame.
-	DXGI_PRESENT_PARAMETERS pp = {};
-	Base::DxgiSwapChain4->Present1(0, 0, &pp);
+		RecordDispatchList(Base::Queues::Compute::Dx12CommandAllocator[0], 
+							Base::Queues::Compute::Dx12CommandList4[0], 
+							Base::Resources::DXR::Dx12RTDescriptorHeap[0], 
+							&Base::Resources::DXR::Shaders::RayGenShaderTable[0]);
+		{
+			//Execute the command list.
+			ID3D12CommandList* listsToExecute[] = { Base::Queues::Compute::Dx12CommandList4[0]};
+			Base::Queues::Compute::Dx12Queue->ExecuteCommandLists(ARRAYSIZE(listsToExecute), listsToExecute);
+		}
+		Base::Queues::Compute::Dx12Queue->Signal(Base::Synchronization::Dx12Fence[0], dispatch1FenceValue + 1);
+		dispatch1FenceValue += 2;
+
+		if (Base::Synchronization::Dx12Fence[1]->GetCompletedValue() < dispatch2FenceValue)
+		{
+			Base::Synchronization::Dx12Fence[1]->SetEventOnCompletion(dispatch2FenceValue, Base::Synchronization::ComputeLoop::EventHandle);
+			WaitForSingleObject(Base::Synchronization::ComputeLoop::EventHandle, EVENT_TIMEOUT_MILLISECONDS);
+		}
+		if (Base::Synchronization::terminate) break;
+
+		RecordDispatchList(Base::Queues::Compute::Dx12CommandAllocator[1],
+							Base::Queues::Compute::Dx12CommandList4[1],
+							Base::Resources::DXR::Dx12RTDescriptorHeap[1],
+							&Base::Resources::DXR::Shaders::RayGenShaderTable[1]);
+		{
+			//Execute the command list.
+			ID3D12CommandList* listsToExecute[] = { Base::Queues::Compute::Dx12CommandList4[1]};
+			Base::Queues::Compute::Dx12Queue->ExecuteCommandLists(ARRAYSIZE(listsToExecute), listsToExecute);
+		}
+		Base::Queues::Compute::Dx12Queue->Signal(Base::Synchronization::Dx12Fence[1], dispatch2FenceValue + 1);
+		dispatch2FenceValue += 2;
+	}
+}
+
+void DirectLoop()
+{
+	UINT64 copy1FenceValue = 1;
+	UINT64 copy2FenceValue = 1;
+	while (true)
+	{
+		if (Base::Synchronization::Dx12Fence[0]->GetCompletedValue() < copy1FenceValue)
+		{
+			Base::Synchronization::Dx12Fence[0]->SetEventOnCompletion(copy1FenceValue, Base::Synchronization::DirectLoop::EventHandle);
+			WaitForSingleObject(Base::Synchronization::DirectLoop::EventHandle, EVENT_TIMEOUT_MILLISECONDS);
+		}
+		if (Base::Synchronization::terminate) break;
+
+		RecordPresentList(Base::Queues::Direct::Dx12CommandAllocator[0], 
+							Base::Queues::Direct::Dx12CommandList4[0], 
+							Base::DxgiSwapChain4->GetCurrentBackBufferIndex(), 
+							Base::Resources::DXR::Dx12OutputResource[0]);
+		{
+			//Execute the command list.
+			ID3D12CommandList* listsToExecute[] = { Base::Queues::Direct::Dx12CommandList4[0]};
+			Base::Queues::Direct::Dx12Queue->ExecuteCommandLists(ARRAYSIZE(listsToExecute), listsToExecute);
+		}
+		Base::Queues::Direct::Dx12Queue->Signal(Base::Synchronization::Dx12Fence[0], copy1FenceValue + 1);
+		copy1FenceValue += 2;
+		{
+			//Present the frame.
+			DXGI_PRESENT_PARAMETERS pp = {};
+			Base::DxgiSwapChain4->Present1(0, DXGI_PRESENT_ALLOW_TEARING, &pp);
+		}
+
+
+		if (Base::Synchronization::Dx12Fence[1]->GetCompletedValue() < copy2FenceValue)
+		{
+			Base::Synchronization::Dx12Fence[1]->SetEventOnCompletion(copy2FenceValue, Base::Synchronization::DirectLoop::EventHandle);
+			WaitForSingleObject(Base::Synchronization::DirectLoop::EventHandle, EVENT_TIMEOUT_MILLISECONDS);
+		}
+		if (Base::Synchronization::terminate) break;
+
+		RecordPresentList(Base::Queues::Direct::Dx12CommandAllocator[1],
+							Base::Queues::Direct::Dx12CommandList4[1],
+							Base::DxgiSwapChain4->GetCurrentBackBufferIndex(),
+							Base::Resources::DXR::Dx12OutputResource[1]);
+		{
+			//Execute the command list.
+			ID3D12CommandList* listsToExecute[] = { Base::Queues::Direct::Dx12CommandList4[1] };
+			Base::Queues::Direct::Dx12Queue->ExecuteCommandLists(ARRAYSIZE(listsToExecute), listsToExecute);
+		}
+		Base::Queues::Direct::Dx12Queue->Signal(Base::Synchronization::Dx12Fence[1], copy2FenceValue + 1);
+		copy2FenceValue += 2;
+		{
+			//Present the frame.
+			DXGI_PRESENT_PARAMETERS pp = {};
+			Base::DxgiSwapChain4->Present1(0, DXGI_PRESENT_ALLOW_TEARING, &pp);
+		}
+	}
+}
+
+void TerminateLoops()
+{
+	Base::Synchronization::terminate = true;
 }
