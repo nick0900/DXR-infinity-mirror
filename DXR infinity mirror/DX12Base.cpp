@@ -693,7 +693,7 @@ void createTopLevelAS(ID3D12GraphicsCommandList4* pCmdList)
 	Base::Resources::DXR::TopBuffers.pInstanceDesc->Map(0, nullptr, (void**)&pInstanceDesc);
 
 	static float rotY = 0;
-	rotY += PI / (float)FRAMES_FOR_AVERAGE_CALCULATION;
+	rotY += 2 * PI / (float)FRAMES_FOR_AVERAGE_CALCULATION;
 	for (int i = 0; i < MODEL_PARTS; i++)
 	{
 		pInstanceDesc->InstanceID = i;                            // exposed to the shader via InstanceID()

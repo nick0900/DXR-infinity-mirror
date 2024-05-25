@@ -4,8 +4,8 @@
 
 // Window init
 #define APPLICATION_NAME L"Infinimirror_Test" //The name of the application and window
-const unsigned int SCREEN_WIDTH = 1280; //Width of application.
-const unsigned int SCREEN_HEIGHT = 720;	//Height of application.
+const unsigned int SCREEN_WIDTH = 3840; //Width of application.
+const unsigned int SCREEN_HEIGHT = 2160;	//Height of application.
 //
 
 // DX config
@@ -38,5 +38,5 @@ const DWORD EVENT_TIMEOUT_MILLISECONDS = 1000; //one second
 
 // Frame measuring
 const uint32_t FRAMES_FOR_AVERAGE_CALCULATION = 1000;
-#define RESULT_SAVE_PATH "720p.csv"
+#define RESULT_SAVE_PATH "4k.csv"
 //
