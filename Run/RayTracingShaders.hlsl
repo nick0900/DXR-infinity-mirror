@@ -17,12 +17,14 @@ struct Vertex
 
 StructuredBuffer<Vertex> Vertecies : register(t1);
 StructuredBuffer<uint> Indecies : register(t2);
+//
 
 //Edges Resources
 cbuffer CB_EdgesShaderTableLocal : register(b0, space2)
 {
 	float3 ShaderTableColor;
 }
+//
 
 struct RayPayload
 {
@@ -93,7 +95,7 @@ void closestHit_mirror(inout RayPayload payload, in BuiltInTriangleIntersectionA
     
     ray.TMin = 0;
     ray.TMax = 100000;
-    //payload.color = worldNormal;
+ 
     TraceRay(gRtScene, RAY_FLAG_CULL_BACK_FACING_TRIANGLES /*rayFlags*/, 0xFF, 0 /* ray index*/, 0, 0, ray, payload);
 }
 

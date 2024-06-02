@@ -1403,6 +1403,7 @@ void ComputeLoop()
 	UINT64 dispatch2FenceValue = 0;
 	while (true)
 	{
+		//First UAV
 		if (Base::Synchronization::Dx12Fence[0]->GetCompletedValue() < dispatch1FenceValue)
 		{
 			Base::Synchronization::Dx12Fence[0]->SetEventOnCompletion(dispatch1FenceValue, Base::Synchronization::ComputeLoop::EventHandle);
@@ -1421,7 +1422,9 @@ void ComputeLoop()
 		}
 		Base::Queues::Compute::Dx12Queue->Signal(Base::Synchronization::Dx12Fence[0], dispatch1FenceValue + 1);
 		dispatch1FenceValue += 2;
+		//
 
+		//Second UAV
 		if (Base::Synchronization::Dx12Fence[1]->GetCompletedValue() < dispatch2FenceValue)
 		{
 			Base::Synchronization::Dx12Fence[1]->SetEventOnCompletion(dispatch2FenceValue, Base::Synchronization::ComputeLoop::EventHandle);
@@ -1440,6 +1443,7 @@ void ComputeLoop()
 		}
 		Base::Queues::Compute::Dx12Queue->Signal(Base::Synchronization::Dx12Fence[1], dispatch2FenceValue + 1);
 		dispatch2FenceValue += 2;
+		//
 	}
 }
 
@@ -1449,6 +1453,7 @@ void DirectLoop()
 	UINT64 copy2FenceValue = 1;
 	while (true)
 	{
+		//First UAV
 		if (Base::Synchronization::Dx12Fence[0]->GetCompletedValue() < copy1FenceValue)
 		{
 			Base::Synchronization::Dx12Fence[0]->SetEventOnCompletion(copy1FenceValue, Base::Synchronization::DirectLoop::EventHandle);
@@ -1472,8 +1477,9 @@ void DirectLoop()
 			DXGI_PRESENT_PARAMETERS pp = {};
 			Base::DxgiSwapChain4->Present1(0, DXGI_PRESENT_ALLOW_TEARING, &pp);
 		}
+		//
 
-
+		//Second UAV
 		if (Base::Synchronization::Dx12Fence[1]->GetCompletedValue() < copy2FenceValue)
 		{
 			Base::Synchronization::Dx12Fence[1]->SetEventOnCompletion(copy2FenceValue, Base::Synchronization::DirectLoop::EventHandle);
@@ -1497,6 +1503,7 @@ void DirectLoop()
 			DXGI_PRESENT_PARAMETERS pp = {};
 			Base::DxgiSwapChain4->Present1(0, DXGI_PRESENT_ALLOW_TEARING, &pp);
 		}
+		//
 	}
 }
 

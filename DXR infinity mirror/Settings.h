@@ -4,8 +4,8 @@
 
 // Window init
 #define APPLICATION_NAME L"Infinimirror_Test" //The name of the application and window
-const unsigned int SCREEN_WIDTH = 3840; //Width of application.
-const unsigned int SCREEN_HEIGHT = 2160;	//Height of application.
+const unsigned int SCREEN_WIDTH = 1920; //Width of application.
+const unsigned int SCREEN_HEIGHT = 1080;	//Height of application.
 //
 
 // DX config
@@ -30,7 +30,8 @@ const DWORD EVENT_TIMEOUT_MILLISECONDS = 1000; //one second
 //
 
 // Test Setup
-//#define MODEL_FILEPATH "mirrorTest.fbx"
-#define MODEL_FILEPATH "mirrorTestSmooth.fbx"
+// Choose which model to use. comment out the unused one
+#define MODEL_FILEPATH "mirrorTest.fbx"
+//#define MODEL_FILEPATH "mirrorTestSmooth.fbx"
 
 #define MODEL_PARTS 2 //do not modify, current geometry loading is unfinished and assumes value 2

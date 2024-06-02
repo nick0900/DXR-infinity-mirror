@@ -40,6 +40,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 
 			ShowWindow(wndHandle, nCmdShow);
 
+			//Launching the two threads that make up the rendering loop
 			std::thread computeLoop(ComputeLoop);
 			std::thread directLoop(DirectLoop);
 			while (WM_QUIT != msg.message)
